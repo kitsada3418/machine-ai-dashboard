@@ -164,52 +164,101 @@ export default function ProductionPage() {
           Active Work Orders
         </h2>
         {production && production.targetVsActual.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-left text-xs">
-              <thead>
-                <tr className="border-b border-border text-muted">
-                  <th className="py-2 pr-4 font-medium">Job</th>
-                  <th className="py-2 pr-4 font-medium">Work Order</th>
-                  <th className="py-2 pr-4 font-medium">Part</th>
-                  <th className="py-2 pr-4 text-right font-medium">Target</th>
-                  <th className="py-2 pr-4 text-right font-medium">Actual</th>
-                  <th className="py-2 pr-4 text-right font-medium">Reject</th>
-                  <th className="py-2 font-medium">Progress</th>
-                </tr>
-              </thead>
-              <tbody>
-                {production.targetVsActual.map((job) => (
-                  <tr key={job.jobNo} className="border-b border-border/60">
-                    <td className="py-2 pr-4 font-mono">{job.jobNo}</td>
-                    <td className="py-2 pr-4 font-mono text-muted">
-                      {job.workOrderNo}
-                    </td>
-                    <td className="py-2 pr-4">{job.partName}</td>
-                    <td className="py-2 pr-4 text-right font-mono">
-                      {job.targetQty.toLocaleString()}
-                    </td>
-                    <td className="py-2 pr-4 text-right font-mono text-running">
-                      {job.actualQty.toLocaleString()}
-                    </td>
-                    <td className="py-2 pr-4 text-right font-mono text-alarm">
-                      {job.rejectQty.toLocaleString()}
-                    </td>
-                    <td className="py-2">
-                      <div className="flex items-center gap-2">
-                        <div className="h-1.5 w-24 overflow-hidden rounded bg-background">
-                          <div
-                            className="h-full bg-accent"
-                            style={{ width: `${job.progress}%` }}
-                          />
-                        </div>
-                        <span className="font-mono">{job.progress}%</span>
-                      </div>
-                    </td>
+          <>
+            <div className="hidden overflow-x-auto md:block">
+              <table className="w-full min-w-[640px] text-left text-xs">
+                <thead>
+                  <tr className="border-b border-border text-muted">
+                    <th className="py-2 pr-4 font-medium">Job</th>
+                    <th className="py-2 pr-4 font-medium">Work Order</th>
+                    <th className="py-2 pr-4 font-medium">Part</th>
+                    <th className="py-2 pr-4 text-right font-medium">Target</th>
+                    <th className="py-2 pr-4 text-right font-medium">Actual</th>
+                    <th className="py-2 pr-4 text-right font-medium">Reject</th>
+                    <th className="py-2 font-medium">Progress</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {production.targetVsActual.map((job) => (
+                    <tr key={job.jobNo} className="border-b border-border/60">
+                      <td className="py-2 pr-4 font-mono">{job.jobNo}</td>
+                      <td className="py-2 pr-4 font-mono text-muted">
+                        {job.workOrderNo}
+                      </td>
+                      <td className="py-2 pr-4">{job.partName}</td>
+                      <td className="py-2 pr-4 text-right font-mono">
+                        {job.targetQty.toLocaleString()}
+                      </td>
+                      <td className="py-2 pr-4 text-right font-mono text-running">
+                        {job.actualQty.toLocaleString()}
+                      </td>
+                      <td className="py-2 pr-4 text-right font-mono text-alarm">
+                        {job.rejectQty.toLocaleString()}
+                      </td>
+                      <td className="py-2">
+                        <div className="flex items-center gap-2">
+                          <div className="h-1.5 w-24 overflow-hidden rounded bg-background">
+                            <div
+                              className="h-full bg-accent"
+                              style={{ width: `${job.progress}%` }}
+                            />
+                          </div>
+                          <span className="font-mono">{job.progress}%</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex flex-col gap-3 md:hidden">
+              {production.targetVsActual.map((job) => (
+                <div
+                  key={job.jobNo}
+                  className="rounded-lg border border-border bg-surface p-4"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-sm font-semibold">
+                      {job.jobNo}
+                    </span>
+                    <span className="font-mono text-[11px] text-muted">
+                      {job.workOrderNo}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-muted">{job.partName}</p>
+                  <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                    <div className="rounded border border-border bg-panel px-2 py-2">
+                      <p className="text-[10px] text-muted">Target</p>
+                      <p className="mt-0.5 font-mono text-sm">
+                        {job.targetQty.toLocaleString()}
+                      </p>
+                    </div>
+                    <div className="rounded border border-running/30 bg-running/5 px-2 py-2">
+                      <p className="text-[10px] text-muted">Actual</p>
+                      <p className="mt-0.5 font-mono text-sm text-running">
+                        {job.actualQty.toLocaleString()}
+                      </p>
+                    </div>
+                    <div className="rounded border border-alarm/30 bg-alarm/5 px-2 py-2">
+                      <p className="text-[10px] text-muted">Reject</p>
+                      <p className="mt-0.5 font-mono text-sm text-alarm">
+                        {job.rejectQty.toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex items-center gap-2">
+                    <div className="h-1.5 flex-1 overflow-hidden rounded bg-background">
+                      <div
+                        className="h-full bg-accent"
+                        style={{ width: `${job.progress}%` }}
+                      />
+                    </div>
+                    <span className="font-mono text-xs">{job.progress}%</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
         ) : (
           <p className="py-8 text-center text-xs text-muted">No active work orders</p>
         )}

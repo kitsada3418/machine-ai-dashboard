@@ -92,7 +92,7 @@ export default function AlarmCenterPage() {
               setStatus(option);
               setPage(1);
             }}
-            className={`rounded border px-3 py-1.5 text-xs transition-colors ${
+            className={`rounded border px-3 py-2 text-xs transition-colors md:py-1.5 ${
               status === option
                 ? "border-accent bg-accent/10 text-accent"
                 : "border-border bg-panel text-muted hover:text-foreground"
@@ -115,7 +115,7 @@ export default function AlarmCenterPage() {
       )}
 
       <section className="overflow-hidden rounded-lg border border-border bg-panel">
-        <div className="overflow-x-auto">
+        <div className="hidden overflow-x-auto md:block">
           <table className="w-full min-w-[760px] text-left text-xs">
             <thead>
               <tr className="border-b border-border text-muted">
@@ -153,7 +153,7 @@ export default function AlarmCenterPage() {
                   <td className="px-4 py-2.5 font-mono text-muted">
                     {alarm.endTime
                       ? new Date(alarm.endTime).toLocaleString()
-                      : "â€”"}
+                      : "—"}
                   </td>
                   <td className="px-4 py-2.5">
                     <AlarmStatusText status={alarm.status} />
@@ -169,7 +169,7 @@ export default function AlarmCenterPage() {
                           Acknowledge
                         </button>
                       ) : (
-                        <span className="text-muted">â€”</span>
+                        <span className="text-muted">—</span>
                       )}
                     </td>
                   )}
@@ -177,6 +177,51 @@ export default function AlarmCenterPage() {
               ))}
             </tbody>
           </table>
+        </div>
+
+        <div className="flex flex-col gap-3 p-3 md:hidden">
+          {(data?.items ?? []).map((alarm) => (
+            <div
+              key={alarm.id}
+              className="rounded-lg border border-border bg-surface p-4"
+            >
+              <div className="flex items-center gap-2">
+                <SeverityBadge severity={alarm.severity} />
+                <span className="font-mono text-xs font-semibold">
+                  {alarm.alarmCode}
+                </span>
+                <span className="ml-auto">
+                  <AlarmStatusText status={alarm.status} />
+                </span>
+              </div>
+              <p className="mt-2.5 text-sm text-foreground">{alarm.message}</p>
+              <div className="mt-2.5 flex items-center gap-2 text-[11px] text-muted">
+                <span className="font-mono font-semibold text-foreground">
+                  {alarm.machine.machineCode}
+                </span>
+                <span className="min-w-0 truncate">
+                  {alarm.machine.machineName}
+                </span>
+                <span className="ml-auto shrink-0">
+                  Started {new Date(alarm.startTime).toLocaleString()}
+                </span>
+              </div>
+              {alarm.endTime && (
+                <p className="mt-1 text-right text-[11px] text-muted">
+                  Ended {new Date(alarm.endTime).toLocaleString()}
+                </p>
+              )}
+              {canAcknowledge && alarm.status === "ACTIVE" && (
+                <button
+                  type="button"
+                  onClick={() => void acknowledge(alarm.id)}
+                  className="mt-3 w-full rounded border border-idle/50 bg-idle/10 px-3 py-2.5 text-xs font-medium text-idle transition-colors hover:bg-idle/20"
+                >
+                  Acknowledge
+                </button>
+              )}
+            </div>
+          ))}
         </div>
         {data && data.items.length === 0 && (
           <p className="py-10 text-center text-xs text-muted">
@@ -188,7 +233,7 @@ export default function AlarmCenterPage() {
             type="button"
             disabled={page <= 1}
             onClick={() => setPage((p) => p - 1)}
-            className="rounded border border-border bg-surface px-3 py-1.5 text-xs text-muted transition-colors hover:text-foreground disabled:opacity-40"
+            className="rounded border border-border bg-surface px-3 py-2 text-xs text-muted transition-colors hover:text-foreground disabled:opacity-40 md:py-1.5"
           >
             Previous
           </button>
@@ -199,7 +244,7 @@ export default function AlarmCenterPage() {
             type="button"
             disabled={page >= totalPages}
             onClick={() => setPage((p) => p + 1)}
-            className="rounded border border-border bg-surface px-3 py-1.5 text-xs text-muted transition-colors hover:text-foreground disabled:opacity-40"
+            className="rounded border border-border bg-surface px-3 py-2 text-xs text-muted transition-colors hover:text-foreground disabled:opacity-40 md:py-1.5"
           >
             Next
           </button>

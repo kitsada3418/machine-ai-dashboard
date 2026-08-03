@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
@@ -43,7 +43,7 @@ export default function AdminPage() {
             key={item.id}
             type="button"
             onClick={() => setTab(item.id)}
-            className={`rounded border px-3 py-1.5 text-xs transition-colors ${
+            className={`rounded border px-3 py-2 text-xs md:py-1.5 transition-colors ${
               tab === item.id
                 ? "border-accent bg-accent/10 text-accent"
                 : "border-border bg-panel text-muted hover:text-foreground"
@@ -130,7 +130,7 @@ function UsersTab({ canManage }: { canManage: boolean }) {
           <button
             type="button"
             onClick={() => setShowForm((v) => !v)}
-            className="rounded bg-accent px-3 py-1.5 text-xs font-semibold text-background hover:opacity-90"
+            className="rounded bg-accent px-3 py-2 text-xs md:py-1.5 font-semibold text-background hover:opacity-90"
           >
             {showForm ? "Cancel" : "+ New User"}
           </button>
@@ -319,7 +319,7 @@ function MachinesTab({ canManage }: { canManage: boolean }) {
           <button
             type="button"
             onClick={() => setShowForm((v) => !v)}
-            className="rounded bg-accent px-3 py-1.5 text-xs font-semibold text-background hover:opacity-90"
+            className="rounded bg-accent px-3 py-2 text-xs md:py-1.5 font-semibold text-background hover:opacity-90"
           >
             {showForm ? "Cancel" : "+ New Machine"}
           </button>
@@ -503,7 +503,7 @@ function MqttTab({ canEdit }: { canEdit: boolean }) {
                 type="button"
                 disabled={saving === item.key}
                 onClick={() => void save(item.key)}
-                className="rounded bg-accent px-3 py-1.5 text-xs font-semibold text-background hover:opacity-90 disabled:opacity-50"
+                className="rounded bg-accent px-3 py-2 text-xs md:py-1.5 font-semibold text-background hover:opacity-90 disabled:opacity-50"
               >
                 {saving === item.key ? "Saving..." : "Save"}
               </button>
@@ -572,7 +572,7 @@ function AuditTab() {
                   {log.userEmail ?? "system"}
                 </td>
                 <td className="px-4 py-2.5 font-mono text-accent">{log.action}</td>
-                <td className="px-4 py-2.5 text-muted">{log.description ?? "—"}</td>
+                <td className="px-4 py-2.5 text-muted">{log.description ?? "â€”"}</td>
               </tr>
             ))}
           </tbody>
@@ -583,7 +583,7 @@ function AuditTab() {
           type="button"
           disabled={page <= 1}
           onClick={() => setPage((p) => p - 1)}
-          className="rounded border border-border bg-surface px-3 py-1.5 text-xs text-muted hover:text-foreground disabled:opacity-40"
+          className="rounded border border-border bg-surface px-3 py-2 text-xs md:py-1.5 text-muted hover:text-foreground disabled:opacity-40"
         >
           Previous
         </button>
@@ -594,7 +594,7 @@ function AuditTab() {
           type="button"
           disabled={page >= totalPages}
           onClick={() => setPage((p) => p + 1)}
-          className="rounded border border-border bg-surface px-3 py-1.5 text-xs text-muted hover:text-foreground disabled:opacity-40"
+          className="rounded border border-border bg-surface px-3 py-2 text-xs md:py-1.5 text-muted hover:text-foreground disabled:opacity-40"
         >
           Next
         </button>
@@ -602,3 +602,4 @@ function AuditTab() {
     </section>
   );
 }
+

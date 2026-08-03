@@ -358,14 +358,18 @@ export default function MachineDetailPage() {
             {machine.activeAlarms.map((alarm) => (
               <div
                 key={alarm.id}
-                className="flex items-center justify-between rounded border border-border bg-surface px-3 py-2 text-xs"
+                className="flex flex-col gap-2 rounded border border-border bg-surface px-3 py-2.5 text-xs md:flex-row md:items-center md:justify-between"
               >
-                <div className="flex items-center gap-3">
+                <div className="flex min-w-0 items-center gap-3">
                   <SeverityBadge severity={alarm.severity} />
-                  <span className="font-mono font-semibold">{alarm.alarmCode}</span>
-                  <span className="text-muted">{alarm.message}</span>
+                  <span className="shrink-0 font-mono font-semibold">
+                    {alarm.alarmCode}
+                  </span>
+                  <span className="min-w-0 truncate text-muted">
+                    {alarm.message}
+                  </span>
                 </div>
-                <span className="font-mono text-muted">
+                <span className="shrink-0 font-mono text-muted">
                   {new Date(alarm.startTime).toLocaleString()}
                 </span>
               </div>

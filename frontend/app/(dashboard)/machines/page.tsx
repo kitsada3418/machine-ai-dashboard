@@ -64,7 +64,7 @@ export default function MachinesPage() {
             key={status}
             type="button"
             onClick={() => setFilter(status)}
-            className={`rounded border px-3 py-1.5 text-xs transition-colors ${
+            className={`rounded border px-3 py-2 text-xs transition-colors md:py-1.5 ${
               filter === status
                 ? "border-accent bg-accent/10 text-accent"
                 : "border-border bg-panel text-muted hover:text-foreground"
