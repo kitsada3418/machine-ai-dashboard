@@ -116,8 +116,10 @@ Files:
 | `backend/Dockerfile`              | Multi-stage build; runs `prisma migrate deploy` on start |
 | `frontend/Dockerfile`             | Multi-stage standalone build (public URLs as build args) |
 | `docker/nginx/nginx.conf`         | `/` → frontend, `/api` + `/socket.io` → backend |
+| `docker/nginx/ssl.conf.example`   | HTTPS config (443 + redirect), filled by `issue-cert.sh` |
 | `scripts/backup.sh`               | pg_dump + mosquitto volume, keeps last N backups |
 | `scripts/restore.sh`              | Restore DB dump (and optionally mosquitto data) |
+| `scripts/issue-cert.sh`           | Let's Encrypt cert + enable HTTPS |
 
 Deploy (on Linux/Ubuntu server):
 
@@ -128,6 +130,21 @@ cp .env.production.example .env.production
 
 docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
 ```
+
+Enable HTTPS (needs a domain pointing at this server and `certbot` installed):
+
+```bash
+# 1. Point DNS: A record -> server IP, then start the stack (http://domain works)
+# 2. Issue certificate + enable HTTPS
+bash scripts/issue-cert.sh
+
+# 3. (Recommended) reload nginx after each automatic renewal
+echo "0 3 * * * root docker compose -f docker-compose.prod.yml --env-file .env.production exec nginx nginx -s reload" > /etc/cron.d/smart-factory-nginx-reload
+```
+
+`issue-cert.sh` writes `docker/nginx/ssl.conf` (mounted into nginx): it enables
+port 443, redirects HTTP -> HTTPS, and keeps the ACME challenge path alive for
+renewals.
 
 Verify:
 
@@ -164,7 +181,10 @@ Notes:
 - Images build for `linux/amd64` and `linux/arm64` (node:22 bookworm/alpine).
 - Next.js public URLs (`NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_SOCKET_URL`) are
   baked in at build time; default same-origin values work behind nginx.
-- Change the entry port with `NGINX_PORT` in `.env.production` (default `80`).
+- Change the entry ports with `NGINX_PORT` / `NGINX_SSL_PORT` (default `80`/`443`).
+- The broker is not exposed to the host; devices on the server publish via the
+  internal network. Exposing MQTT externally requires a firewall rule for
+  1883/8883 and a `machine_Mxxx` credential per device (see MQTT spec).
 
 ## Testing
 
