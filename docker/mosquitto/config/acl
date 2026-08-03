@@ -1,0 +1,96 @@
+# Smart Factory MQTT ACL
+
+user backend
+topic read factory/#
+topic read $SYS/#
+
+user machine_M001
+topic write factory/machine/M001/#
+
+user machine_M002
+topic write factory/machine/M002/#
+
+user machine_M003
+topic write factory/machine/M003/#
+
+user machine_M004
+topic write factory/machine/M004/#
+
+user machine_M005
+topic write factory/machine/M005/#
+
+user machine_M006
+topic write factory/machine/M006/#
+
+user machine_M007
+topic write factory/machine/M007/#
+
+user machine_M008
+topic write factory/machine/M008/#
+
+user machine_M009
+topic write factory/machine/M009/#
+
+user machine_M010
+topic write factory/machine/M010/#
+
+user machine_M011
+topic write factory/machine/M011/#
+
+user machine_M012
+topic write factory/machine/M012/#
+
+user machine_M013
+topic write factory/machine/M013/#
+
+user machine_M014
+topic write factory/machine/M014/#
+
+user machine_M015
+topic write factory/machine/M015/#
+
+user machine_M016
+topic write factory/machine/M016/#
+
+user machine_M017
+topic write factory/machine/M017/#
+
+user machine_M018
+topic write factory/machine/M018/#
+
+user machine_M019
+topic write factory/machine/M019/#
+
+user machine_M020
+topic write factory/machine/M020/#
+
+user machine_M021
+topic write factory/machine/M021/#
+
+user machine_M022
+topic write factory/machine/M022/#
+
+user machine_M023
+topic write factory/machine/M023/#
+
+user machine_M024
+topic write factory/machine/M024/#
+
+user machine_M025
+topic write factory/machine/M025/#
+
+user machine_M026
+topic write factory/machine/M026/#
+
+user machine_M027
+topic write factory/machine/M027/#
+
+user machine_M028
+topic write factory/machine/M028/#
+
+user machine_M029
+topic write factory/machine/M029/#
+
+user machine_M030
+topic write factory/machine/M030/#
+

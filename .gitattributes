@@ -1,0 +1,9 @@
+# Shell scripts must keep LF line endings (run on Linux servers)
+*.sh text eol=lf
+
+# Normalize text files (LF in repo)
+*.ts text eol=lf
+*.tsx text eol=lf
+*.yml text eol=lf
+*.json text eol=lf
+*.md text eol=lf
