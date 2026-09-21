@@ -1,2 +1,0 @@
-# PostgreSQL init scripts (Phase 2: schema/migrations are handled by Prisma).
-# Place SQL bootstrap scripts here if required.
