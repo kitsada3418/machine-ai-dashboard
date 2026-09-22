@@ -17,124 +17,158 @@ function Navbar({ currentPage, setCurrentPage, userRole, onLogout }) {
 
   return (
     <>
-      {/* ฝัง CSS บังคับให้ปุ่มเล็กลงสุดๆ */}
       <style>
         {`
-          .nav-btn-icon-mini {
-            padding: 4px 8px !important;
-            font-size: 0.85rem !important;
-            height: 50px !important;
-            display: inline-flex;
+          /* สไตล์สำหรับปุ่มเมนูใน Sidebar (ปรับให้เล็กลง) */
+          .sidebar-btn {
+            display: flex;
             align-items: center;
-            border-radius: 6px !important;
+            width: 100%;
+            padding: 10px 12px; /* ลด padding */
+            margin-bottom: 4px; /* ลด margin */
+            border: none;
+            background: transparent;
+            color: #475569;
+            border-radius: 8px;
+            transition: all 0.2s;
+            font-weight: 600;
+            font-size: 0.85rem; /* ย่อขนาดฟอนต์เมนู */
           }
-          .nav-btn-icon-mini .nav-icon {
-            font-size: 0.85rem !important; // ลดขนาดไอคอนให้เล็กลง
-            margin-right: 4px !important; // ลดช่องว่างระหว่างไอคอนกับข้อความ
+          .sidebar-btn:hover {
+            background-color: #e2e8f0;
+            color: #0f172a;
+          }
+          .sidebar-btn.active {
+            background-color: #0d6efd;
+            color: white;
+            box-shadow: 0 4px 8px rgba(13, 110, 253, 0.3);
+          }
+          .sidebar-btn .nav-icon {
+            font-size: 1rem; /* ย่อขนาดไอคอน */
+            margin-right: 10px;
+            width: 20px;
+            text-align: center;
+          }
+          
+          /* สกอร์บาร์ */
+          .sidebar-menu-container {
+            overflow-y: auto;
+            flex-grow: 1;
+          }
+          .sidebar-menu-container::-webkit-scrollbar {
+            width: 4px;
+          }
+          .sidebar-menu-container::-webkit-scrollbar-thumb {
+            background-color: #cbd5e1;
+            border-radius: 4px;
           }
         `}
       </style>
 
       <div 
-        className="dashboard-header d-flex flex-column w-100 px-3 py-1 mb-2 shadow-sm" 
+        className="d-flex flex-column shadow-sm" 
         style={{ 
           backgroundColor: '#f4f7fb', 
-          borderRadius: '0 0 12px 12px',
-          border: '1px solid #e2e8f0',
-          position: 'sticky',             
+          width: '200px',       // 📌 ลดความกว้าง Sidebar เหลือ 220px
+          height: '100vh',
+          position: 'fixed',
+          left: '0px',                     
           top: '0px',                     
-          zIndex: '1000',  //
-          gap: '8px' // ลดช่องว่างระหว่างแถวบน-ล่างให้เหลือน้อยที่สุด
+          zIndex: '1000',  
+          borderRight: '1px solid #e2e8f0',
         }}
       >
         
-        {/* ================= แถวบน: โลโก้ & นาฬิกา ================= */}
-        <div className="d-flex justify-content-between align-items-center w-100">
-          
-          {/* โลโก้แบรนด์ (ย่อขนาดฟอนต์และให้อยู่บรรทัดเดียวกัน) */}
-          <div className="d-flex align-items-center gap-2">
-            <span style={{ fontSize: '20px', lineHeight: '1' }}>🏭</span>
-            <div className="d-flex align-items-baseline gap-2">
-              <h2 className="mb-0" style={{ fontSize: '1.5rem', fontWeight: '800', color: '#1e293b' }}>
+        {/* ================= ส่วนบน: โลโก้ & นาฬิกา ================= */}
+        <div className="p-3">
+          <div className="d-flex align-items-center gap-2 mb-3 mt-1">
+            <span style={{ fontSize: '24px', lineHeight: '1' }}>🏭</span>
+            <div>
+              <h2 className="mb-0" style={{ fontSize: '1.2rem', fontWeight: '800', color: '#1e293b' }}>
                 Machine AI
               </h2>
-              <span className="text-muted fw-bold d-none d-md-block" style={{ fontSize: '0.8rem' }}>
+              <div className="text-muted fw-bold" style={{ fontSize: '0.7rem' }}>
                 Smart Factory
-              </span>
+              </div>
             </div>
           </div>
 
-          {/* นาฬิกาดิจิทัล (ย่อขนาดและจัดเรียงแนวนอน) */}
-          <div className="d-flex align-items-center gap-2 text-end pe-1">
-            <span className="text-muted fw-bold text-uppercase" style={{ fontSize: '0.7rem' }}>
+          {/* นาฬิกา */}
+          <div className="bg-white p-2 rounded-3 border text-center shadow-sm">
+            <div className="text-muted fw-bold text-uppercase mb-1" style={{ fontSize: '0.7rem' }}>
               {dateString}
-            </span>
-            <span className="fw-bold text-primary" style={{ fontSize: '1.25rem', lineHeight: '1', fontFamily: 'monospace' }}>
+            </div>
+            <div className="fw-bold text-primary" style={{ fontSize: '1.2rem', lineHeight: '1', fontFamily: 'monospace' }}>
               {timeString}
-            </span>
+            </div>
           </div>
-
         </div>
 
-        {/* เส้นคั่นจางๆ ลดระยะขอบ */}
-        <hr className="my-0" style={{ borderColor: '#cbd5e1', opacity: 0.6 }} />
+        <hr className="my-0 mx-3" style={{ borderColor: '#cbd5e1', opacity: 0.6 }} />
 
-        {/* ================= แถวล่าง: เมนูนำทาง & ปุ่ม Logout ================= */}
-        <div className="d-flex align-items-center justify-content-between flex-wrap w-100" style={{ gap: '4px' }}>
-          
-          {/* กลุ่มปุ่มเมนู (เรียกใช้ class ย่อส่วน nav-btn-icon-mini) */}
-          <div className="d-flex align-items-center flex-wrap" style={{ gap: '4px' }}>
-            <button className={`nav-btn-icon nav-btn-icon-mini ${currentPage === 'dashboard' ? 'active' : ''}`} onClick={() => setCurrentPage('dashboard')}>
-              <span className="nav-icon">📊</span><span className="nav-label">Dashboard</span>
-            </button>
-            <button className={`nav-btn-icon nav-btn-icon-mini ${currentPage === 'graphs' ? 'active' : ''}`} onClick={() => setCurrentPage('graphs')}>
-              <span className="nav-icon">📈</span><span className="nav-label">Graphs</span>
-            </button>
-            <button className={`nav-btn-icon nav-btn-icon-mini ${currentPage === 'logs' ? 'active' : ''}`} onClick={() => setCurrentPage('logs')}>
-              <span className="nav-icon">📜</span><span className="nav-label">Data Logs</span>
-            </button>
-            <button className={`nav-btn-icon nav-btn-icon-mini nav-btn-alarm-icon ${currentPage === 'alarms' ? 'active' : ''}`} onClick={() => setCurrentPage('alarms')}>
-              <span className="nav-icon">🚨</span><span className="nav-label">Alarm Log</span>
-            </button>
-            <button className={`nav-btn-icon nav-btn-icon-mini ${currentPage === 'manager' ? 'active' : ''}`} onClick={() => setCurrentPage('manager')}>
-              <span className="nav-icon">📁</span><span className="nav-label">File Manager</span>
-            </button>
-            <button className={`nav-btn-icon nav-btn-icon-mini ${currentPage === 'layout' ? 'active' : ''}`} onClick={() => setCurrentPage('layout')}>
-              <span className="nav-icon">🗺️</span><span className="nav-label">Layout</span>
-            </button>
-            <button className={`nav-btn-icon nav-btn-icon-mini ${currentPage === 'free_layout' ? 'active' : ''}`} onClick={() => setCurrentPage('free_layout')}>
-              <span className="nav-icon">📐</span><span className="nav-label">Free Layout</span>
-            </button>
-            <button className={`nav-btn-icon nav-btn-icon-mini ${currentPage === 'oee_dashboard' ? 'active' : ''}`} onClick={() => setCurrentPage('oee_dashboard')}>
-              <span className="nav-icon">⚙️</span><span className="nav-label">OEE Dashboard</span>
-            </button>
-            <button className={`nav-btn-icon nav-btn-icon-mini ${currentPage === 'report' ? 'active' : ''}`} onClick={() => setCurrentPage('report')}>
-              <span className="nav-icon">📑</span><span className="nav-label">Report</span>
-            </button>
-            <button className={`nav-btn-icon nav-btn-icon-mini ${currentPage === 'user_management' ? 'active' : ''}`} onClick={() => setCurrentPage('user_management')}>
-              <span className="nav-icon">👥</span><span className="nav-label">User Management</span>
-            </button>
-            <button className={`nav-btn-icon nav-btn-icon-mini ${currentPage === 'maintenance' ? 'active' : ''}`} onClick={() => setCurrentPage('maintenance')}>
-              <span className="nav-icon">🔧</span><span className="nav-label">Maintenance</span>
-            </button>
-
-            {userRole === 'admin' && (
-              <button className={`nav-btn-icon nav-btn-icon-mini ${currentPage === 'supervisor' ? 'active' : ''}`} onClick={() => setCurrentPage('supervisor')}>
-                <span className="nav-icon">👔</span><span className="nav-label">Supervisor</span>
-              </button>
-            )}
-          </div>
-
-          {/* ข้อมูลผู้ใช้ และปุ่ม Logout */}
-          <div className="d-flex align-items-center ms-auto ps-2 border-start border-2 border-secondary-subtle" style={{ gap: '6px' }}>
-            <span className="badge bg-secondary px-2 py-2" style={{ fontSize: '0.85rem' }}>{userRole.toUpperCase()}</span>
-            <button className="btn btn-danger text-white d-flex align-items-center px-2 border-0 shadow-sm" style={{ height: '26px', fontSize: '0.7rem', borderRadius: '6px' }} onClick={onLogout}>
-              <i className="bi bi-box-arrow-right me-1"
-              style={{ fontSize: '1.5rem' }}></i> Logout 
-            </button>
-          </div>
-
+        {/* ================= ส่วนกลาง: เมนูนำทาง ================= */}
+        <div className="sidebar-menu-container px-2 py-3 d-flex flex-column">
+          <button className={`sidebar-btn ${currentPage === 'dashboard' ? 'active' : ''}`} onClick={() => setCurrentPage('dashboard')}>
+            <span className="nav-icon">📊</span><span className="nav-label">Dashboard</span>
+          </button>
+          <button className={`sidebar-btn ${currentPage === 'graphs' ? 'active' : ''}`} onClick={() => setCurrentPage('graphs')}>
+            <span className="nav-icon">📈</span><span className="nav-label">Graphs</span>
+          </button>
+          <button className={`sidebar-btn ${currentPage === 'logs' ? 'active' : ''}`} onClick={() => setCurrentPage('logs')}>
+            <span className="nav-icon">📜</span><span className="nav-label">Data Logs</span>
+          </button>
+          <button className={`sidebar-btn ${currentPage === 'alarms' ? 'active' : ''}`} onClick={() => setCurrentPage('alarms')}>
+            <span className="nav-icon">🚨</span><span className="nav-label">Alarm Log</span>
+          </button>
+          <button className={`sidebar-btn ${currentPage === 'manager' ? 'active' : ''}`} onClick={() => setCurrentPage('manager')}>
+            <span className="nav-icon">📁</span><span className="nav-label">File Manager</span>
+          </button>
+          <button className={`sidebar-btn ${currentPage === 'layout' ? 'active' : ''}`} onClick={() => setCurrentPage('layout')}>
+            <span className="nav-icon">🗺️</span><span className="nav-label">Layout</span>
+          </button>
+          <button className={`sidebar-btn ${currentPage === 'free_layout' ? 'active' : ''}`} onClick={() => setCurrentPage('free_layout')}>
+            <span className="nav-icon">📐</span><span className="nav-label">Free Layout</span>
+          </button>
+          <button className={`sidebar-btn ${currentPage === 'oee_dashboard' ? 'active' : ''}`} onClick={() => setCurrentPage('oee_dashboard')}>
+            <span className="nav-icon">⚙️</span><span className="nav-label">OEE Dashboard</span>
+          </button>
+          <button className={`sidebar-btn ${currentPage === 'report' ? 'active' : ''}`} onClick={() => setCurrentPage('report')}>
+            <span className="nav-icon">📑</span><span className="nav-label">Report</span>
+          </button>
+          <button className={`sidebar-btn ${currentPage === 'user_management' ? 'active' : ''}`} onClick={() => setCurrentPage('user_management')}>
+            <span className="nav-icon">👥</span><span className="nav-label">User Management</span>
+          </button>
+          <button className={`sidebar-btn ${currentPage === 'maintenance' ? 'active' : ''}`} onClick={() => setCurrentPage('maintenance')}>
+            <span className="nav-icon">🔧</span><span className="nav-label">Maintenance</span>
+          </button>
+          <button className={`sidebar-btn ${currentPage === 'supervisor' ? 'active' : ''}`} onClick={() => setCurrentPage('supervisor')}>
+            <span className="nav-icon">👔</span><span className="nav-label">Supervisor</span>
+          </button>
         </div>
+
+        {/* ================= ส่วนล่าง: User & Logout ================= */}
+        <div className="p-3 mt-auto bg-white border-top shadow-sm">
+          <div className="d-flex flex-column gap-2">
+            <div className="d-flex align-items-center gap-2 mb-1">
+              <div className="bg-primary bg-opacity-10 p-1 rounded-circle text-primary" style={{ width: '32px', height: '32px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                <i className="bi bi-person-fill"></i>
+              </div>
+              <div>
+                <div className="text-muted fw-bold" style={{ fontSize: '0.65rem' }}>LOGGED IN AS</div>
+                <span className="badge bg-secondary" style={{ fontSize: '0.7rem' }}>{userRole.toUpperCase()}</span>
+              </div>
+            </div>
+            
+            <button 
+              className="btn btn-danger text-white w-100 d-flex justify-content-center align-items-center shadow-sm fw-bold" 
+              style={{ borderRadius: '6px', padding: '8px', fontSize: '0.85rem' }} 
+              onClick={onLogout}
+            >
+              <i className="bi bi-box-arrow-left me-2"></i> Logout 
+            </button>
+          </div>
+        </div>
+
       </div>
     </>
   );

@@ -267,4 +267,4 @@ async function saveLog(machineId, data) {
             }
 }
 
-module.exports = { setupMQTT, liveDataCache };
+module.exports = { setupMQTT, liveDataCache ,machineTrackers};

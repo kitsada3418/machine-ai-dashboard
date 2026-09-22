@@ -141,27 +141,27 @@ function Manager() {
               
               {/* ผมเพิ่มคลาส border และ rounded-3 ตรงนี้เพื่อให้เส้นขอบตารางโค้งมนสวยงามอยู่ตรงกลาง */}
               <div className="table-responsive border rounded-3" style={{ maxHeight: '500px', overflowY: 'auto' }}>
-                <table className="table table-bordered table-editable mb-0 align-middle w-100" style={{ width: '100%', minWidth: '800px', tableLayout: 'fixed' }}>
+                <table className="table table-bordered table-editable mb-0 align-middle w-100" style={{ width: '100%', minWidth: '600px', tableLayout: 'fixed' }}>
                   <thead style={{ backgroundColor: 'var(--bg-main)', position: 'sticky', top: 0, zIndex: 1 }}>
                     <tr className="text-center text-secondary" style={{ fontSize: '0.85rem' }}>
                       <th style={{ width: '5%' }}>#</th>
-                      <th style={{ width: '15%' }}>SIZE</th>
+                      <th style={{ width: '20%' }}>SIZE</th>
                       <th style={{ width: '15%' }}>TERMINAL</th>
                       <th style={{ width: '10%' }}>X</th>
                       <th style={{ width: '10%' }}>Y</th>
-                      <th style={{ width: '35%' }}>CUSTOMER</th>
+                      <th style={{ width: '30%' }}>CUSTOMER</th>
                       <th style={{ width: '10%' }}>Del</th>
                     </tr>
                   </thead>
                   <tbody>
                     {settingsData.map((row, index) => (
-                      <tr key={row.id}>
+                      <tr key={row.id} >
                         <td className="text-center text-muted fw-bold small">{index + 1}</td>
-                        <td><input type="text" value={row.size} onChange={(e) => handleInputChange(index, 'size', e.target.value)} /></td>
-                        <td><input type="text" value={row.terminal} onChange={(e) => handleInputChange(index, 'terminal', e.target.value)} /></td>
-                        <td><input type="number" value={row.x} onChange={(e) => handleInputChange(index, 'x', e.target.value)} /></td>
-                        <td><input type="number" value={row.y} onChange={(e) => handleInputChange(index, 'y', e.target.value)} /></td>
-                        <td><input type="text" value={row.customer} onChange={(e) => handleInputChange(index, 'customer', e.target.value)} /></td>
+                        <td><input type="text" value={row.size} onChange={(e) => handleInputChange(index, 'size', e.target.value)} className="text-center" /></td>
+                        <td><input type="text" value={row.terminal} onChange={(e) => handleInputChange(index, 'terminal', e.target.value)} className="text-center" /></td>
+                        <td><input type="number" value={row.x} onChange={(e) => handleInputChange(index, 'x', e.target.value)} className="text-center" /></td>
+                        <td><input type="number" value={row.y} onChange={(e) => handleInputChange(index, 'y', e.target.value)} className="text-center" /></td>
+                        <td><input type="text" value={row.customer} onChange={(e) => handleInputChange(index, 'customer', e.target.value)} className="text-center" /></td>
                         <td className="text-center">
                           <button className="btn btn-sm btn-outline-danger border-0" onClick={() => handleDeleteRow(index)}>
                             <i className="bi bi-x-lg"></i>

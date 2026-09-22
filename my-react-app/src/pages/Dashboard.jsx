@@ -1,34 +1,407 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 function Dashboard() {
-  const [viewMode, setViewMode] = useState('table');
+  const [viewMode, setViewMode] = useState('table'); // 'grid' หรือ 'table'
+  const [dashboardData, setDashboardData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [lastUpdate, setLastUpdate] = useState(new Date());
+
+  const fetchDashboardData = async () => {
+    try {
+      const response = await fetch('http://localhost:5000/api/data_live');
+      if (!response.ok) throw new Error('Network response was not ok');
+      const result = await response.json();
+      setDashboardData(result);
+      setLastUpdate(new Date());
+      setLoading(false);
+    } catch (error) {
+      console.error('Error fetching dashboard data:', error);
+    }
+  };
+
+  useEffect(() => {
+    fetchDashboardData();
+    const interval = setInterval(fetchDashboardData, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const totalProduction = dashboardData?.total_day || 0;
+  const mhOnline = dashboardData?.mh_online || 0;
+  const mhCount = dashboardData?.mh_count || 0;
+  
+  const allMachineIds = dashboardData?.mh_list || [];
+  const liveData = dashboardData?.data || {};
+
+  // ผสานข้อมูลระหว่างรายชื่อเครื่องทั้งหมดกับข้อมูล Real-time
+  const machineList = allMachineIds.map((mhId) => {
+    const machineInfo = liveData[mhId];
+    if (machineInfo) {
+      return {
+        Mh_ID: mhId,
+        ...machineInfo,
+        status: machineInfo.status?.toLowerCase() || 'running'
+      };
+    } else {
+      // ถ้าไม่มีข้อมูลใน Cache ให้กำหนดเป็น Offline
+      return {
+        Mh_ID: mhId,
+        status: 'offline',
+        emp_id: '-',
+        customer: '-',
+        job_id: '-',
+        cycle_time: '-',
+        ok: 0,
+        qty_order: 0,
+        total_day: 0,
+        t_run: '-',
+        t_start: '-'
+      };
+    }
+  });
+
+  const mhStop = machineList.filter(item => item.status === 'stopped' || item.status === 'offline').length;
+
+  const filteredMachines = machineList.filter((item) => {
+    const machineId = (item.Mh_ID || '').toLowerCase();
+    const matchesSearch = machineId.includes(searchTerm.toLowerCase());
+    const status = (item.status || '').toLowerCase();
+    const matchesStatus = statusFilter === 'ALL' || status.includes(statusFilter.toLowerCase());
+    return matchesSearch && matchesStatus;
+  });
+
+  const sortedMachines = [...filteredMachines].sort((a, b) => {
+    const aIsOffline = a.status === 'offline';
+    const bIsOffline = b.status === 'offline';
+
+    if (aIsOffline && !bIsOffline) return 1;
+    if (!aIsOffline && bIsOffline) return -1;
+
+    return a.Mh_ID.localeCompare(b.Mh_ID, undefined, { numeric: true, sensitivity: 'base' });
+  });
 
   return (
-    <>
-      <div className="row g-3 mb-4">
-        <div className="col-xl-3 col-md-6"><div className="kpi-card"><div className="kpi-title">📦 Total Production</div><div className="kpi-value text-info">0</div></div></div>
-        <div className="col-xl-3 col-md-6"><div className="kpi-card"><div className="kpi-title">⚡ Active Machines</div><div className="kpi-value text-success">0 / 0</div></div></div>
-        <div className="col-xl-3 col-md-6"><div className="kpi-card"><div className="kpi-title">🚨 Stalled / Alarms</div><div className="kpi-value text-danger">0</div></div></div>
-        <div className="col-xl-3 col-md-6"><div className="kpi-card"><div className="kpi-title">⏱️ Average Cycle Time</div><div className="kpi-value text-warning">0.00 s</div></div></div>
-      </div>
+    <div className="animate__animated animate__fadeIn container-fluid p-4" style={{ backgroundColor: '#f8f9fa', minHeight: '100vh' }}>
+      
+      {/* ================= HEADER ================= */}
+      
 
-      <div className="toolbar-box mb-4">
-        <div className="d-flex flex-wrap justify-content-between align-items-center gap-2">
-          <div className="d-flex gap-2">
-            <input className="form-control-dark" placeholder="🔍 Search Machine..." style={{ minWidth: '260px' }} />
-            <select className="form-select-dark"><option value="ALL">All Status</option></select>
+      {/* ================= KPI CARDS ================= */}
+      <div className="row g-4 mb-4">
+        <div className="col-xl-3 col-md-6">
+          <div className="card border-0 rounded-4 p-4 shadow-sm h-100 position-relative overflow-hidden kpi-hover">
+            <div className="d-flex justify-content-between align-items-start position-relative z-1">
+              <div>
+                <h6 className="text-muted fw-bold text-uppercase small mb-1">Total Production</h6>
+                <h2 className="fw-bold text-primary my-1" style={{ fontSize: '2.5rem' }}>{totalProduction.toLocaleString()}</h2>
+                <span className="text-muted small">Units Produced Today</span>
+              </div>
+              <div className="bg-primary bg-opacity-10 text-primary p-3 rounded-circle">
+                <i className="bi bi-boxes fs-3"></i>
+              </div>
+            </div>
           </div>
-          <div className="btn-group">
-            <button className={`view-btn ${viewMode === 'grid' ? 'active' : ''}`} onClick={() => setViewMode('grid')}>🎴</button>
-            <button className={`view-btn ${viewMode === 'table' ? 'active' : ''}`} onClick={() => setViewMode('table')}>📋</button>
+        </div>
+        
+        <div className="col-xl-3 col-md-6">
+          <div className="card border-0 rounded-4 p-4 shadow-sm h-100 position-relative overflow-hidden kpi-hover">
+            <div className="d-flex justify-content-between align-items-start position-relative z-1">
+              <div>
+                <h6 className="text-muted fw-bold text-uppercase small mb-1">Active Machines</h6>
+                <h2 className="fw-bold text-success my-1" style={{ fontSize: '2.5rem' }}>{mhOnline} <span className="fs-4 text-muted">/ {mhCount}</span></h2>
+                <span className="text-success small fw-bold"><i className="bi bi-check-circle me-1"></i>Running smoothly</span>
+              </div>
+              <div className="bg-success bg-opacity-10 text-success p-3 rounded-circle">
+                <i className="bi bi-play-circle-fill fs-3"></i>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="col-xl-3 col-md-6">
+          <div className="card border-0 rounded-4 p-4 shadow-sm h-100 position-relative overflow-hidden kpi-hover">
+            <div className="d-flex justify-content-between align-items-start position-relative z-1">
+              <div>
+                <h6 className="text-muted fw-bold text-uppercase small mb-1">Offline</h6>
+                <h2 className="fw-bold text-danger my-1" style={{ fontSize: '2.5rem' }} >{mhStop}</h2>
+                <span className="text-danger small fw-bold"><i className="bi bi-exclamation-triangle me-1"></i>Requires Attention</span>
+              </div>
+              <div className="bg-danger bg-opacity-10 text-danger p-3 rounded-circle">
+                <i className="bi bi-stop-circle-fill fs-3"></i>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="col-xl-3 col-md-6">
+          <div className="card border-0 rounded-4 p-4 shadow-sm h-100 position-relative overflow-hidden kpi-hover">
+            <div className="d-flex justify-content-between align-items-start position-relative z-1">
+              <div>
+                <h6 className="text-muted fw-bold text-uppercase small mb-1">Avg Cycle Time</h6>
+                <h2 className="fw-bold text-warning my-1" style={{ fontSize: '2.5rem' }}>42.8 <span className="fs-4 text-muted">s</span></h2>
+                <span className="text-muted small">Overall Plant Avg Speed</span>
+              </div>
+              <div className="bg-warning bg-opacity-10 text-warning p-3 rounded-circle">
+                <i className="bi bi-stopwatch-fill fs-3"></i>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      <div className="text-center text-muted" style={{ padding: '60px 20px', fontSize: '1.2rem' }}>
-        Loading Factory Dashboard Data...
+      {/* ================= TOOLBAR ================= */}
+      <div className="card border-0 rounded-4 shadow-sm bg-white mb-4">
+        <div className="card-body p-3 d-flex flex-wrap justify-content-between align-items-center gap-3">
+          <div className="d-flex flex-wrap gap-3 flex-grow-1">
+            <div className="input-group" style={{ maxWidth: '350px' }}>
+              <span className="input-group-text bg-light border-end-0 text-muted"><i className="bi bi-search"></i></span>
+              <input 
+                className="form-control border-start-0 bg-light" 
+                placeholder="Search Machine, Job, or Customer..." 
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+            <div className="input-group" style={{ maxWidth: '250px' }}>
+              <span className="input-group-text bg-light border-end-0 text-muted"><i className="bi bi-funnel"></i></span>
+              <select 
+                className="form-select border-start-0 bg-light fw-bold"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+              >
+                <option value="ALL">All Status</option>
+                <option value="running">🟢 Running</option>
+                <option value="stopped">🔴 Stopped</option>
+                <option value="offline">⚪ Offline</option>
+              </select>
+            </div>
+          </div>
+          
+          <div className="bg-light p-1 rounded-pill border">
+            <button 
+              className={`btn rounded-pill px-4 fw-bold ${viewMode === 'grid' ? 'btn-white shadow-sm text-primary' : 'btn-light text-muted border-0'}`} 
+              onClick={() => setViewMode('grid')}
+            >
+              <i className="bi bi-grid-fill me-2"></i> Grid
+            </button>
+            <button 
+              className={`btn rounded-pill px-4 fw-bold ${viewMode === 'table' ? 'btn-white shadow-sm text-primary' : 'btn-light text-muted border-0'}`} 
+              onClick={() => setViewMode('table')}
+            >
+              <i className="bi bi-list-ul me-2"></i> Table
+            </button>
+          </div>
+        </div>
       </div>
-    </>
+
+      {/* ================= CONTENT AREA ================= */}
+      {loading ? (
+        <div className="d-flex flex-column justify-content-center align-items-center py-5">
+          <div className="spinner-border text-primary" style={{ width: '3rem', height: '3rem' }} role="status"></div>
+          <div className="mt-3 text-muted fw-bold fs-5">Loading Live Data...</div>
+        </div>
+      ) : filteredMachines.length === 0 ? (
+        <div className="text-center py-5 bg-white rounded-4 border-0 shadow-sm">
+          <i className="bi bi-search display-1 text-muted opacity-25"></i>
+          <h4 className="text-muted mt-3 fw-bold">ไม่พบข้อมูลเครื่องจักรที่ค้นหา</h4>
+        </div>
+      ) : viewMode === 'grid' ? (
+        
+        /* ------------------- GRID VIEW ------------------- */
+        <div className="row g-4">
+          {sortedMachines.map((item, index) => {
+            const isOffline = item.status === 'offline';
+            const isStopped = item.status === 'stopped';
+            
+            // การตั้งค่าสีตาม Status
+            let statusColor = 'success';
+            let statusIcon = 'bi-play-fill';
+            let statusText = 'RUNNING';
+            let borderColor = 'border-success';
+
+            if (isOffline) {
+              statusColor = 'secondary'; statusIcon = 'bi-wifi-off'; statusText = 'OFFLINE'; borderColor = 'border-secondary opacity-75';
+            } else if (isStopped) {
+              statusColor = 'danger'; statusIcon = 'bi-stop-fill'; statusText = 'STOPPED'; borderColor = 'border-danger';
+            }
+
+            // คำนวณ Progress (ป้องกันหารด้วย 0)
+            const qtyOrder = Number(item.qty_order) || 0;
+            const qtyOk = Number(item.ok) || 0;
+            const progress = qtyOrder > 0 ? Math.min((qtyOk / qtyOrder) * 100, 100) : 0;
+
+            return (
+              <div className="col-xl-3 col-lg-4 col-md-6" key={index}>
+                <div className={`card h-100 border-2 rounded-4 shadow-sm card-hover ${borderColor} bg-white`}>
+                  
+                  {/* Card Header */}
+                  <div className="card-header bg-transparent border-0 pt-3 pb-0 d-flex justify-content-between align-items-center">
+                    <h4 className="fw-bold m-0 text-dark d-flex align-items-center">
+                      <i className={`bi bi-hdd-rack-fill text-${statusColor} me-2`}></i> {item.Mh_ID}
+                    </h4>
+                    <span className={`badge bg-${statusColor} bg-opacity-10 text-${statusColor} border border-${statusColor} rounded-pill px-2 py-1`}>
+                      <i className={`bi ${statusIcon} me-1`}></i>{statusText}
+                    </span>
+                  </div>
+                  
+                  <div className="card-body pt-3 pb-3">
+                    {/* Operator & Customer */}
+                    <div className="d-flex justify-content-between mb-3 bg-light p-2 rounded-3">
+                      <div>
+                        <div className="text-muted" style={{ fontSize: '0.7rem', fontWeight: 'bold' }}>OPERATOR</div>
+                        <div className="fw-bold text-dark"><i className="bi bi-person me-1 text-muted"></i>{item.emp_id || '-'}</div>
+                      </div>
+                      <div className="text-end">
+                        <div className="text-muted" style={{ fontSize: '0.7rem', fontWeight: 'bold' }}>CUSTOMER</div>
+                        <div className="fw-bold text-primary text-truncate" style={{ maxWidth: '100px' }} title={item.customer}>{item.customer || '-'}</div>
+                      </div>
+                    </div>
+
+                    {/* Job & Cycle Time */}
+                    <div className="row g-2 mb-3">
+                      <div className="col-7">
+                        <div className="text-muted" style={{ fontSize: '0.7rem', fontWeight: 'bold' }}>JOB ID</div>
+                        <div className="fw-bold text-warning text-truncate" style={{ color: '#f37208' }}>
+                          <i className="bi bi-clipboard-data me-1 text-muted"></i>{item.job_id || '-'}
+                        </div>
+                      </div>
+                      <div className="col-5 text-end">
+                        <div className="text-muted" style={{ fontSize: '0.7rem', fontWeight: 'bold' }}>CYCLE TIME</div>
+                        <div className="fw-bold text-dark"><i className="bi bi-stopwatch me-1 text-muted"></i>{item.cycle_time || 0}s</div>
+                      </div>
+                    </div>
+
+                    {/* Target Progress Bar */}
+                    <div className="mb-3">
+                      <div className="d-flex justify-content-between align-items-end mb-1">
+                        <span className="text-muted fw-bold" style={{ fontSize: '0.75rem' }}>JOB PROGRESS</span>
+                        <span className="fw-bold text-success" style={{ fontSize: '0.85rem' }}>{qtyOk.toLocaleString()} / {qtyOrder.toLocaleString()}</span>
+                      </div>
+                      <div className="progress" style={{ height: '8px' }}>
+                        <div 
+                          className={`progress-bar bg-${statusColor} progress-bar-striped ${!isOffline && !isStopped ? 'progress-bar-animated' : ''}`} 
+                          role="progressbar" 
+                          style={{ width: `${progress}%` }}
+                        ></div>
+                      </div>
+                      <div className="text-end mt-1 text-muted fw-bold" style={{ fontSize: '0.7rem' }}>{progress.toFixed(1)}%</div>
+                    </div>
+                  </div>
+
+                  {/* Card Footer (Total Today) */}
+                  <div className="card-footer bg-transparent border-top pt-2 pb-3 text-center">
+                    <div className="text-muted fw-bold text-uppercase mb-1" style={{ fontSize: '0.75rem' }}>Total Output Today</div>
+                    <h3 className="m-0 fw-bold text-dark">{Number(item.total_day || 0).toLocaleString()} <span className="fs-6 text-muted">PCS</span></h3>
+                  </div>
+
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        
+        /* ------------------- TABLE VIEW ------------------- */
+        <div className="card border-0 rounded-4 shadow-sm bg-white overflow-hidden">
+          <div className="table-responsive">
+            <table className="table table-hover align-middle mb-0">
+              <thead className="table-light">
+                <tr className="text-center align-middle text-muted small fw-bold" style={{ letterSpacing: '0.5px' }}>
+                  <th className="py-3">MACHINE</th> 
+                  <th>STATUS</th>
+                  <th>ALARM</th>
+                  <th>OPERATOR ID</th>
+                  <th>CUSTOMER</th>
+                  <th>JOB ID</th>
+                  <th>QTY PROGRESS</th>
+                  <th>TOTAL (TODAY)</th>
+                  <th>START TIME</th>
+                  <th>RUN TIME</th>
+                  <th>CYCLE (S)</th>
+                </tr>
+              </thead>
+              <tbody className="border-top-0">
+                {sortedMachines.map((item, index) => {
+                  const isOffline = item.status === 'offline';
+                  const isStopped = item.status === 'stopped';
+                  
+                  let statusColor = 'success';
+                  let statusText = 'RUN';
+                  if (isOffline) { statusColor = 'secondary'; statusText = 'OFFLINE'; }
+                  else if (isStopped) { statusColor = 'danger'; statusText = 'STOP'; }
+
+                  const qtyOrder = Number(item.qty_order) || 0;
+                  const qtyOk = Number(item.ok) || 0;
+                  const progress = qtyOrder > 0 ? Math.min((qtyOk / qtyOrder) * 100, 100) : 0;
+
+                  return (
+                    <tr key={index} className={`text-center align-middle ${isOffline ? 'opacity-50 bg-light' : ''}`}>
+                      <td className="fw-bold text-dark fs-6">{item.Mh_ID}</td>
+                      <td>
+                        <span className={`badge bg-${statusColor} bg-opacity-10 text-${statusColor} border border-${statusColor} rounded-pill px-3`}>
+                          {statusText}
+                        </span>
+                      </td>
+                      <td className="text-danger fw-bold">{item.alarm || '-'}</td>
+                      <td className="fw-bold text-muted">{item.emp_id}</td>
+                      <td className="fw-bold text-primary">{item.customer}</td>
+                      <td className="fw-bold" style={{ color: '#f37208' }}>{item.job_id}</td>
+                      
+                      {/* QTY Progress Column */}
+                      <td style={{ minWidth: '150px' }}>
+                        <div className="d-flex justify-content-between small fw-bold mb-1">
+                          <span className="text-success">{qtyOk.toLocaleString()}</span>
+                          <span className="text-muted">{qtyOrder.toLocaleString()}</span>
+                        </div>
+                        <div className="progress" style={{ height: '6px' }}>
+                          <div className={`progress-bar bg-${statusColor}`} style={{ width: `${progress}%` }}></div>
+                        </div>
+                      </td>
+                      
+                      <td className="fw-bold fs-5 text-dark">{Number(item.total_day || 0).toLocaleString()}</td>
+                      <td className="text-muted small">{item.t_start || '-'}</td>
+                      <td className="text-muted fw-bold">{item.t_run || '-'}</td>
+                      <td className="fw-bold"><i className="bi bi-stopwatch text-muted me-1"></i>{item.cycle_time}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ================= CUSTOM CSS ================= */}
+      <style>{`
+        .kpi-hover {
+          transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        .kpi-hover:hover {
+          transform: translateY(-5px);
+          box-shadow: 0 10px 20px rgba(0,0,0,0.08) !important;
+        }
+        .card-hover {
+          transition: all 0.2s ease-in-out;
+        }
+        .card-hover:hover {
+          transform: translateY(-3px);
+          box-shadow: 0 8px 15px rgba(0,0,0,0.1) !important;
+        }
+        .pulse-animation {
+          animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+          0% { opacity: 1; }
+          50% { opacity: 0.5; }
+          100% { opacity: 1; }
+        }
+        .btn-white {
+          background-color: white;
+        }
+      `}</style>
+
+    </div>
   );
 }
 

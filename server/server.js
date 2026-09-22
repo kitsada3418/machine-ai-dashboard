@@ -3,7 +3,7 @@ require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
-const { setupMQTT, liveDataCache } = require('./mqttHandler');
+const { setupMQTT, liveDataCache ,machineTrackers} = require('./mqttHandler');
 const pool = require('./db');
 const app = express();
 
@@ -13,6 +13,34 @@ app.use(express.json());
 // เก็บ Cache แยกตาม Mh_ID
 let machineCache = {};
 
+async function getMasterDataSummary(mhId_All, empId_All, mh_count, emp_count) {
+    try {
+        let results = {};
+
+        if (mhId_All === 'true') {
+            const [rows] = await pool.query(`SELECT Mh_ID FROM Machine ORDER BY Mh_ID ASC`);
+            results.mhList = rows.map(row => row.Mh_ID); // ดึงเฉพาะค่า Mh_ID ออกมาเป็น Array ของชื่อเครื่อง
+        }
+        if (empId_All === 'true') {
+            const [rows] = await pool.query(`SELECT Emp_ID FROM Emp ORDER BY Emp_ID ASC`);
+            results.empList = rows.map(row => row.Emp_ID);
+        }
+        if (mh_count === 'true') {
+            const [rows] = await pool.query(`SELECT COUNT(DISTINCT Mh_ID) AS mh_count FROM Machine`);
+            results.mhCount = rows[0].mh_count;
+        }
+        if (emp_count === 'true') {
+            const [rows] = await pool.query(`SELECT COUNT(DISTINCT Emp_ID) AS emp_count FROM Emp`);
+            results.empCount = rows[0].emp_count;
+        }
+
+        return results;
+    } catch (err) {
+        console.error('Database Query Error:', err);
+        return null;
+    }
+}
+
 async function getDatadayTime(mhId,jobId) 
 {
     if (machineCache[mhId]) {
@@ -21,7 +49,7 @@ async function getDatadayTime(mhId,jobId)
         }
     }
     try {
-    const query = `SELECT sum(ok) as total_ok
+    const query = `SELECT max(ok) as total_ok
                   FROM production_sum
                   WHERE Mh_ID = ?
                   AND job_id != ?
@@ -46,19 +74,32 @@ async function getDatadayTime(mhId,jobId)
 app.get('/api/data_live',async (req, res) => {
    try {
         // ตรวจสอบว่ามีข้อมูลใน cache ไหม
-        if (!liveDataCache || Object.keys(liveDataCache).length === 0) {
-            return res.status(404).send('No live data available');
+        if (liveDataCache && Object.keys(liveDataCache).length > 0) {
+        // วนลูปเช็คหรือแก้ไขข้อมูลภายในลูปนี้เท่านั้น
+            for (const [mhId, machineData] of Object.entries(liveDataCache)) {
+                // ดึงข้อมูลจากฐานข้อมูล
+                const pastOk = await getDatadayTime(mhId, machineData.job_id);
+                machineData.total_day = Number(pastOk) + Number(machineData.ok || 0);
+                //machineData.status = (machineData[mhId]?.job_id?.length || 0) > 0 ? 'RUN' : 'STOP';
+            }
         }
 
-        // วนลูปเช็คหรือแก้ไขข้อมูลภายในลูปนี้เท่านั้น
-        for (const [mhId, machineData] of Object.entries(liveDataCache)) {
-            // ดึงข้อมูลจากฐานข้อมูล
-            const pastOk = await getDatadayTime(mhId, machineData.job_id);
-            machineData.total_day = Number(pastOk) + Number(machineData.ok || 0);
-        }
+        const sumTotalDay = Object.values(liveDataCache).reduce((acc, item) => {
+            return acc + (item.total_day || 0);
+        }, 0);
+
+        const masterSummary = await getMasterDataSummary('true', 'false', 'true', 'false');
 
         // ส่งข้อมูลทั้งหมดกลับไป
-        res.json(liveDataCache);
+        res.json({
+            mh_count: masterSummary?.mhCount || 0,
+            mh_list: masterSummary?.mhList || [], // เพิ่มรายชื่อเครื่องทั้งหมดตรงนี้
+            mh_online: Object.values(liveDataCache).length,
+            mh_run: Object.values(liveDataCache).filter(item => item.status === 'RUN').length,
+            mh_stop: Object.values(liveDataCache).filter(item => item.status === 'STOP').length,
+            total_day: sumTotalDay,
+            data: liveDataCache
+        });
 
     } catch (err) {
         console.error(err);
@@ -192,7 +233,7 @@ app.get('/api/datalog', async (req, res) => {
 
 app.get('/api/production/filter', async (req, res) => {
     try {
-        const { empId, mhId, daily, monthly, yearly, All_year } = req.query;
+        const { empId, mhId, daily, monthly, yearly, All_year,summary } = req.query;
         let query = ``;
         let params = [];
 
@@ -380,6 +421,44 @@ app.get('/api/production/filter', async (req, res) => {
 // ดึงข้อมูลรายเดือน    http://localhost:5000/api/production/filter?&mhId=PU-42&yearly=2026
 // ดึงข้อมูลรายปี       http://localhost:5000/api/production/filter?&mhId=PU-42&All_year=true
 
+// ดึงรายชื่อเป้าหมาย (Machine หรือ Employee) ที่มีข้อมูลตามช่วงเวลา
+app.get('/api/production/targets', async (req, res) => {
+    try {
+        const { viewMode, daily, monthly, yearly, All_year } = req.query;
+        
+        // เลือกว่าจะดึงคอลัมน์ไหนตาม viewMode
+        let targetColumn = viewMode === 'machine' ? 'Mh_ID' : 'Emp_ID';
+        
+        // ใช้ DISTINCT เพื่อไม่ให้ชื่อซ้ำ
+        let query = `SELECT DISTINCT ${targetColumn} AS id FROM production_sum WHERE 1=1`;
+        let params = [];
+
+        if (daily) {
+            query += ` AND CAST(Log_Timestamp AS DATE) = ?`;
+            params.push(daily);
+        } else if (monthly) {
+            query += ` AND DATE_FORMAT(Log_Timestamp, '%Y-%m') = ?`;
+            params.push(monthly);
+        } else if (yearly) {
+            query += ` AND DATE_FORMAT(Log_Timestamp, '%Y') = ?`;
+            params.push(yearly);
+        }
+
+        // ป้องกันค่าว่าง (NULL)
+        query += ` AND ${targetColumn} IS NOT NULL AND ${targetColumn} != ''`;
+
+        const [rows] = await pool.query(query, params);
+        
+        // แปลงให้อยู่ในรูป Array ของ String เช่น ['PU-38', 'PU-42']
+        const targetList = rows.map(row => row.id);
+
+        res.json(targetList);
+    } catch (err) {
+        console.error('Error fetching targets:', err);
+        res.status(500).send('Server Error');
+    }
+});
+
 //ถ้าอยากดึงข้อมูลทั้งหมดโดยไม่ระบุเงื่อนไขใด ๆ สามารถเรียก API ได้ดังนี้:
 // ดึงข้อมูลทั้งหมด   http://localhost:5000/api/production/filter?All_year=true
 
@@ -389,9 +468,11 @@ app.get('/api/production/downtime', async (req, res) => {
         let query = '';
         let params = [];
 
-        year = datetime ? datetime.split('-')[0] : null; // ดึงปีจากวันที่
-        month = datetime ? datetime.split('-')[1] : null; // ดึงเดือนจากวันที่
-        day = datetime ? datetime.split('-')[2] : null; // ดึงวันจากวันที่   
+        
+
+        let year = datetime ? datetime.split('-')[0] : null; // ดึงปีจากวันที่
+        let month = datetime ? datetime.split('-')[1] : null; // ดึงเดือนจากวันที่
+        let day = datetime ? datetime.split('-')[2] : null; // ดึงวันจากวันที่   
 
         if (datetime) {
             if (sum === 'true') {

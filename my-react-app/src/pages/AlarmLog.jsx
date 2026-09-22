@@ -1,260 +1,342 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 function AlarmLog() {
-  // 1. ข้อมูลจำลองสถานะพนักงาน (เช็คพนักงานหาย / ว่าง)
-  const [employeeStatus] = useState([
-    { id: 'EMP-001', name: 'สมชาย', active: 7.5, idle: 0.5 },
-    { id: 'EMP-002', name: 'วิชัย', active: 6.5, idle: 1.5 },
-    { id: 'EMP-003', name: 'กฤษดา', active: 7.0, idle: 1.0 },
-    { id: 'EMP-005', name: 'สมศรี', active: 3.5, idle: 4.5 }, // หายไปนานกว่าปกติ
-  ]);
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(false);
+  
+  // ================= STATE FOR VIEW MODE =================
+  // สลับโหมดว่ากราฟจะโชว์ข้อมูลเปรียบเทียบระหว่าง "เครื่องจักร" หรือ "พนักงาน"
+  const [viewMode, setViewMode] = useState('machine'); 
 
-  // 2. ข้อมูลจำลองของการแจ้งเตือน (Alarm Data)
-  const [alarms, setAlarms] = useState([
-    { id: 'ALM-1001', machine: 'PU-41', code: 'ERR-02', message: 'Motor Temperature High', severity: 'High', timestamp: '2026-09-22 10:15:22', status: 'Active' },
-    { id: 'ALM-1002', machine: 'PU-43', code: 'SNS-15', message: 'Sensor Disconnected', severity: 'Medium', timestamp: '2026-09-22 09:40:10', status: 'Active' },
-    { id: 'ALM-1003', machine: 'PU-42', code: 'JAM-01', message: 'Conveyor Belt Jammed', severity: 'High', timestamp: '2026-09-22 08:30:05', status: 'Cleared' },
-    { id: 'ALM-1004', machine: 'PU-44', code: 'PWR-05', message: 'Voltage Fluctuation', severity: 'Low', timestamp: '2026-09-21 16:20:00', status: 'Cleared' },
-    { id: 'ALM-1005', machine: 'PU-41', code: 'ERR-01', message: 'E-Stop Pressed', severity: 'High', timestamp: '2026-09-21 14:15:00', status: 'Cleared' },
-  ]);
+  // ================= STATE FOR FILTERS =================
+  const [filterPeriod, setFilterPeriod] = useState('day'); 
+  const [filterDate, setFilterDate] = useState(new Date().toISOString().split('T')[0]);
+  const [filterMh, setFilterMh] = useState('all');
+  const [filterEmp, setFilterEmp] = useState('all');
+  const [isSummary, setIsSummary] = useState(false); 
+  
+  // ================= STATE FOR DROPDOWNS =================
+  const [machineOptions, setMachineOptions] = useState([]);
+  const [employeeOptions, setEmployeeOptions] = useState([]);
 
-  // State สำหรับการกรองข้อมูล Alarm
-  const [filterStatus, setFilterStatus] = useState('All');
-  const [searchQuery, setSearchQuery] = useState('');
+  // ================= STATE FOR PAGINATION =================
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10; 
 
-  // ฟังก์ชันกดรับทราบปัญหา (Clear Alarm)
-  const handleAcknowledge = (id) => {
-    if (window.confirm(`คุณต้องการยืนยันการแก้ไขปัญหาและ Clear Alarm: ${id} ใช่หรือไม่?`)) {
-      setAlarms(alarms.map(alarm => 
-        alarm.id === id ? { ...alarm, status: 'Cleared' } : alarm
-      ));
+  // 📌 1. ฟังก์ชันจัดรูปแบบวันที่ให้ตรงกับที่ API ต้องการ
+  const getFormattedDatetime = () => {
+    if (!filterDate) return '';
+    if (filterPeriod === 'day') return filterDate;
+    if (filterPeriod === 'month') return filterDate.slice(0, 7);
+    if (filterPeriod === 'year') return filterDate.slice(0, 4);
+    return filterDate;
+  };
+
+  // 📌 2. ฟังก์ชันอัปเดต Dropdown ให้แสดงเฉพาะข้อมูลที่มีในวันนั้น
+  const fetchOptionsForDate = async () => {
+    try {
+      const queryParams = new URLSearchParams();
+      const datetime = getFormattedDatetime();
+      if (datetime) queryParams.append('datetime', datetime);
+      
+      const response = await fetch(`http://localhost:5000/api/production/downtime?${queryParams.toString()}`);
+      if (!response.ok) throw new Error('Failed to fetch options');
+      
+      const rawData = await response.json();
+      
+      const uniqueMh = [...new Set(rawData.map(item => item.Mh_ID).filter(Boolean))].sort();
+      const uniqueEmp = [...new Set(rawData.map(item => item.Emp_ID).filter(Boolean))].sort();
+      
+      setMachineOptions(uniqueMh);
+      setEmployeeOptions(uniqueEmp);
+
+      setFilterMh(prev => uniqueMh.includes(prev) ? prev : 'all');
+      setFilterEmp(prev => uniqueEmp.includes(prev) ? prev : 'all');
+
+    } catch (error) {
+      console.error('Error fetching dropdown options:', error);
+      setMachineOptions([]);
+      setEmployeeOptions([]);
     }
   };
 
-  // ตัวแปรสำหรับกรองข้อมูลที่จะนำไปแสดงในตาราง Alarm
-  const filteredAlarms = alarms.filter(alarm => {
-    const matchStatus = filterStatus === 'All' || alarm.status === filterStatus;
-    const matchSearch = alarm.machine.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                        alarm.message.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                        alarm.code.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchStatus && matchSearch;
-  });
+  useEffect(() => {
+    fetchOptionsForDate();
+  }, [filterDate, filterPeriod]);
 
-  // คำนวณยอดสรุป (KPIs)
-  const activeCount = alarms.filter(a => a.status === 'Active').length;
-  const highSeverityCount = alarms.filter(a => a.status === 'Active' && a.severity === 'High').length;
-  const clearedCount = alarms.filter(a => a.status === 'Cleared').length;
+  // 📌 3. ฟังก์ชันดึงข้อมูลบันทึกการหยุดเครื่อง
+  const fetchLogs = async () => {
+    setLoading(true);
+    try {
+      const queryParams = new URLSearchParams();
+      
+      const datetime = getFormattedDatetime();
+      if (datetime) queryParams.append('datetime', datetime);
+      
+      if (filterMh !== 'all') queryParams.append('mhId', filterMh);
+      if (filterEmp !== 'all') queryParams.append('empId', filterEmp);
+      if (isSummary) queryParams.append('sum', 'true');
+
+      const response = await fetch(`http://localhost:5000/api/production/downtime?${queryParams.toString()}`);
+      if (!response.ok) throw new Error('Failed to fetch downtime logs');
+      
+      const result = await response.json();
+      setLogs(result || []);
+      setCurrentPage(1);
+    } catch (error) {
+      console.error('Error fetching downtime logs:', error);
+      setLogs([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchLogs();
+  }, [filterPeriod, filterDate, filterMh, filterEmp, isSummary]); 
+
+  // ================= PREPARE DATA (SUM & CHART) =================
+  // คำนวณยอดรวมเวลาหยุดเครื่องทั้งหมดของตารางนี้
+  const totalDowntimeMins = logs.reduce((sum, log) => {
+    return sum + (Number(isSummary ? log.total_stop_minutes : log.stop_minutes) || 0);
+  }, 0);
+
+  // จัดกลุ่มข้อมูลสำหรับวาดกราฟ โดยแยกตาม viewMode (Machine หรือ Employee)
+  const getChartData = () => {
+    const agg = {};
+    logs.forEach(log => {
+      // ใช้เงื่อนไขดึง Key ตามมุมมองหลัก
+      const key = viewMode === 'machine' ? (log.Mh_ID || 'Unknown') : (log.Emp_ID || 'Unknown');
+      const mins = Number(isSummary ? log.total_stop_minutes : log.stop_minutes) || 0;
+      
+      if (!agg[key]) agg[key] = 0;
+      agg[key] += mins;
+    });
+
+    return Object.keys(agg)
+      .map(key => ({ target: key, minutes: agg[key] }))
+      .sort((a, b) => b.minutes - a.minutes); // เรียงจากมากไปน้อย
+  };
+  
+  const chartData = getChartData();
+
+  // ================= PAGINATION LOGIC =================
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentLogs = logs.slice(indexOfFirstItem, indexOfLastItem);
+  const totalPages = Math.ceil(logs.length / itemsPerPage) || 1;
+
+  const COLORS = ['#dc3545', '#e4606d', '#f37208', '#f89a4f', '#fbc79a'];
 
   return (
-    <div className="animate__animated animate__fadeIn">
+    <div className="animate__animated animate__fadeIn container-fluid p-4">
       
-      {/* HEADER */}
+      {/* ================= HEADER & VIEW TOGGLE ================= */}
       <div className="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4 gap-3">
-        <div>
-          <h2 className="fw-bold mb-1" style={{ color: 'var(--text-primary)' }}>🚨 Machine & Staff Monitoring</h2>
-          <span className="text-muted fs-6">Real-time alerts and employee idle tracking</span>
+        <h4 className="m-0 ps-3 border-start border-4 border-danger d-flex align-items-center text-danger fw-bold">
+          🚨 Downtime & Alarm Logs
+        </h4>
+        
+        {/* สวิตช์สลับมุมมองหลักสำหรับกราฟ (Machine vs Employee) */}
+        <div className="bg-white p-1 rounded-pill shadow-sm border d-inline-flex">
+          <button 
+            className={`btn rounded-pill px-4 fw-bold ${viewMode === 'machine' ? 'btn-danger' : 'btn-light text-muted border-0'}`}
+            onClick={() => setViewMode('machine')}
+          >
+            <i className="bi bi-robot me-2"></i> View by Machine
+          </button>
+          <button 
+            className={`btn rounded-pill px-4 fw-bold ${viewMode === 'employee' ? 'btn-danger' : 'btn-light text-muted border-0'}`}
+            onClick={() => setViewMode('employee')}
+          >
+            <i className="bi bi-person-badge me-2"></i> View by Employee
+          </button>
         </div>
-        <button className="btn btn-outline-danger fw-bold px-4 rounded-pill shadow-sm" onClick={() => alert('กำลังดาวน์โหลดรายงาน Alarm...')}>
-          <i className="bi bi-download me-1"></i> Export Log
-        </button>
       </div>
 
-      {/* ==================================================================================== */}
-      {/* 🚀 ระบบเปรียบเทียบพนักงานหาย (อยู่ด้านบนสุดของหน้า Alarm) */}
-      {/* ==================================================================================== */}
-      <div className="card border-2 rounded-4 p-4 shadow-sm bg-white mb-4 border-info">
-        <div className="d-flex justify-content-between align-items-center mb-3">
-          <h5 className="fw-bold text-info mb-0">
-            <i className="bi bi-stopwatch-fill me-2"></i> Employee Idle Tracking (แจ้งเตือนพนักงานหาย)
-          </h5>
-          <span className="badge bg-light text-dark border">Base Shift: 8 Hours</span>
+      {/* ================= FILTER BAR ================= */}
+      <div className="card p-3 mb-4 border-2 rounded-4 shadow-sm bg-white border-danger border-opacity-25">
+        <div className="row g-3 align-items-end">
+          <div className="col-md-2">
+            <label className="form-label text-muted fw-bold mb-1" style={{ fontSize: '0.8rem' }}>PERIOD</label>
+            <select className="form-select border-2 fw-bold" value={filterPeriod} onChange={(e) => setFilterPeriod(e.target.value)}>
+              <option value="day">Daily</option>
+              <option value="month">Monthly</option>
+              <option value="year">Yearly</option>
+            </select>
+          </div>
+          <div className="col-md-2">
+            <label className="form-label text-muted fw-bold mb-1" style={{ fontSize: '0.8rem' }}>DATE</label>
+            <input 
+              type="date" 
+              className="form-control fw-bold border-2 text-primary" 
+              value={filterDate}
+              onChange={(e) => setFilterDate(e.target.value)}
+            />
+          </div>
+          <div className="col-md-2">
+            <label className="form-label text-muted fw-bold mb-1" style={{ fontSize: '0.8rem' }}>MACHINE</label>
+            <select className="form-select border-2 fw-bold" value={filterMh} onChange={(e) => setFilterMh(e.target.value)}>
+              <option value="all">All Machines</option>
+              {machineOptions.map((mh, index) => (
+                <option key={`mh-${index}`} value={mh}>{mh}</option>
+              ))}
+            </select>
+          </div>
+          <div className="col-md-2">
+            <label className="form-label text-muted fw-bold mb-1" style={{ fontSize: '0.8rem' }}>EMPLOYEE</label>
+            <select className="form-select border-2 fw-bold" value={filterEmp} onChange={(e) => setFilterEmp(e.target.value)}>
+              <option value="all">All Employees</option>
+              {employeeOptions.map((emp, index) => (
+                <option key={`emp-${index}`} value={emp}>Emp: {emp}</option>
+              ))}
+            </select>
+          </div>
+          <div className="col-md-2">
+            <div className="form-check form-switch mt-2">
+              <input 
+                className="form-check-input" 
+                type="checkbox" 
+                id="summarySwitch" 
+                checked={isSummary}
+                onChange={(e) => setIsSummary(e.target.checked)}
+                style={{ transform: 'scale(1.3)', cursor: 'pointer' }}
+              />
+              <label className="form-check-label fw-bold ms-2 text-primary" htmlFor="summarySwitch" style={{ cursor: 'pointer' }}>
+                Summary Mode
+              </label>
+            </div>
+            <small className="text-muted" style={{ fontSize: '0.75rem' }}>Show total minutes only</small>
+          </div>
+          <div className="col-md-2">
+            <button className="btn btn-danger w-100 fw-bold shadow-sm" onClick={fetchLogs}>
+              <i className="bi bi-search me-2"></i> Refresh
+            </button>
+          </div>
         </div>
+      </div>
+
+      <div className="row g-4">
         
-        <div className="row g-3">
-          {employeeStatus.map((emp) => {
-            const activePercent = (emp.active / 8) * 100;
-            const idlePercent = (emp.idle / 8) * 100;
-            const isIdleHigh = emp.idle >= 3; // กำหนดเงื่อนไขว่าหายเกิน 3 ชม. คือผิดปกติ
-            
-            return (
-              <div className="col-md-6 col-lg-3" key={emp.id}>
-                <div className={`border-2 rounded-3 p-3 text-center h-100 ${isIdleHigh ? 'border-danger bg-danger-subtle' : 'border-light bg-light'}`}>
-                  <div className="fw-bold text-dark text-truncate">{emp.id} - {emp.name}</div>
-                  
-                  {/* แถบ Progress Bar */}
-                  <div className="progress my-3 border bg-white shadow-sm" style={{ height: '24px', borderRadius: '12px' }}>
-                    <div className="progress-bar bg-success fw-bold" style={{ width: `${activePercent}%` }}>
-                      {emp.active}h
-                    </div>
-                    <div className="progress-bar bg-danger fw-bold" style={{ width: `${idlePercent}%` }}>
-                      {emp.idle}h
-                    </div>
-                  </div>
-                  
-                  <div className="d-flex justify-content-between small fw-bold px-1">
-                    <span className="text-success"><i className="bi bi-person-workspace me-1"></i> Active</span>
-                    {isIdleHigh ? (
-                      <span className="text-danger animate__animated animate__flash animate__infinite">
-                        <i className="bi bi-exclamation-triangle-fill me-1"></i> AWOL ({emp.idle}h)
-                      </span>
+        {/* ================= CHART SECTION ================= */}
+        <div className="col-xl-4 col-lg-5">
+          <div className="card border-2 rounded-4 shadow-sm bg-white h-100 border-danger border-opacity-25">
+            <div className="card-header bg-white py-3 border-bottom d-flex justify-content-between align-items-center">
+              <strong className="text-danger">
+                <i className="bi bi-bar-chart-fill me-2"></i>
+                Compare by {viewMode === 'machine' ? 'Machine' : 'Employee'}
+              </strong>
+              
+              {/* ป้ายแสดงยอดรวมเวลาหยุดเครื่อง */}
+              <span className="badge bg-danger fs-6 px-3 py-2 shadow-sm">
+                Total: {totalDowntimeMins} Mins
+              </span>
+            </div>
+            <div className="card-body p-3 d-flex flex-column justify-content-center" style={{ minHeight: '350px' }}>
+              {loading ? (
+                <div className="text-center"><div className="spinner-border text-danger"></div></div>
+              ) : chartData.length === 0 ? (
+                <div className="text-center text-muted fw-bold small">ไม่มีข้อมูลเปรียบเทียบในขณะนี้</div>
+              ) : (
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={chartData} layout="vertical" margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                    <XAxis type="number" hide />
+                    <YAxis dataKey="target" type="category" width={80} tick={{ fontSize: 12, fontWeight: 'bold', fill: '#495057' }} axisLine={false} tickLine={false} />
+                    <Tooltip 
+                      cursor={{fill: 'transparent'}}
+                      formatter={(value) => [`${value} นาที`, 'Stop Time']}
+                    />
+                    <Bar dataKey="minutes" radius={[0, 4, 4, 0]} barSize={20} label={{ position: 'right', fill: '#dc3545', fontSize: 12, fontWeight: 'bold' }}>
+                      {chartData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* ================= DATA TABLE ================= */}
+        <div className="col-xl-8 col-lg-7">
+          <div className="card border-2 rounded-4 shadow-sm bg-white h-100">
+            <div className="card-body p-0 d-flex flex-column h-100">
+              <div className="table-responsive flex-grow-1">
+                <table className="table table-hover table-striped align-middle mb-0" style={{ fontSize: '0.9rem' }}>
+                  <thead className={isSummary ? "table-primary" : "table-danger"}>
+                    <tr className="text-center">
+                      {!isSummary && <th>Start Time</th>}
+                      {!isSummary && <th>End Time</th>}
+                      <th>Machine</th>
+                      <th>Employee</th>
+                      <th>{isSummary ? 'Total Stop (Mins)' : 'Duration (Mins)'}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {loading ? (
+                      <tr>
+                        <td colSpan={isSummary ? "3" : "5"} className="text-center py-5">
+                          <div className="spinner-border text-danger" role="status"></div>
+                        </td>
+                      </tr>
+                    ) : currentLogs.length === 0 ? (
+                      <tr>
+                        <td colSpan={isSummary ? "3" : "5"} className="text-center py-5 text-muted fw-bold">
+                          ✅ ไม่มีประวัติการหยุดเครื่องจักรในเงื่อนไขที่เลือก
+                        </td>
+                      </tr>
                     ) : (
-                      <span className="text-danger">Idle: {emp.idle}h</span>
+                      currentLogs.map((log, index) => (
+                        <tr key={index} className="text-center">
+                          {!isSummary && (
+                            <td className="text-nowrap text-muted small">{new Date(log.Start_Time).toLocaleString('en-GB')}</td>
+                          )}
+                          {!isSummary && (
+                            <td className="text-nowrap text-muted small">
+                              {log.End_Time ? new Date(log.End_Time).toLocaleString('en-GB') : <span className="badge bg-warning text-dark">Ongoing</span>}
+                            </td>
+                          )}
+                          <td className="fw-bold text-primary">{log.Mh_ID || '-'}</td>
+                          <td>{log.Emp_ID || '-'}</td>
+                          <td>
+                            <span className={`badge ${log.total_stop_minutes > 60 || log.stop_minutes > 60 ? 'bg-danger' : 'bg-secondary'} fs-6`}>
+                              {isSummary ? log.total_stop_minutes : log.stop_minutes}
+                            </span>
+                          </td>
+                        </tr>
+                      ))
                     )}
+                  </tbody>
+                </table>
+              </div>
+              
+              {/* PAGINATION */}
+              {!loading && logs.length > 0 && (
+                <div className="card-footer bg-white border-top p-3 d-flex justify-content-between align-items-center mt-auto">
+                  <span className="text-muted small fw-bold">
+                    Showing {indexOfFirstItem + 1} to {Math.min(indexOfLastItem, logs.length)}
+                  </span>
+                  <div className="btn-group">
+                    <button className="btn btn-outline-secondary btn-sm fw-bold" disabled={currentPage === 1} onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}>
+                      ◀ Prev
+                    </button>
+                    <span className="btn btn-secondary btn-sm disabled text-white fw-bold">
+                      {currentPage} / {totalPages}
+                    </span>
+                    <button className="btn btn-outline-secondary btn-sm fw-bold" disabled={currentPage === totalPages} onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}>
+                      Next ▶
+                    </button>
                   </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-      {/* ==================================================================================== */}
-
-      {/* KPI CARDS (Alarm) */}
-      <div className="row g-4 mb-4">
-        <div className="col-md-4">
-          <div className="card border-2 rounded-4 p-4 shadow-sm text-center bg-white" style={{ borderColor: activeCount > 0 ? '#dc3545' : '#dee2e6' }}>
-            <span className="text-muted small fw-bold">ACTIVE ALARMS</span>
-            <h2 className={`fw-bold my-2 ${activeCount > 0 ? 'text-danger' : 'text-success'}`} style={{ fontSize: '2.5rem' }}>
-              {activeCount}
-            </h2>
-            <span className="badge bg-light text-secondary border">Unresolved Issues</span>
-          </div>
-        </div>
-        <div className="col-md-4">
-          <div className="card border-2 rounded-4 p-4 shadow-sm text-center bg-white">
-            <span className="text-muted small fw-bold">HIGH SEVERITY (ACTIVE)</span>
-            <h2 className={`fw-bold my-2 ${highSeverityCount > 0 ? 'text-danger' : 'text-secondary'}`} style={{ fontSize: '2.5rem' }}>
-              {highSeverityCount}
-            </h2>
-            <span className="badge bg-light text-secondary border">Requires Immediate Action</span>
-          </div>
-        </div>
-        <div className="col-md-4">
-          <div className="card border-2 rounded-4 p-4 shadow-sm text-center bg-white">
-            <span className="text-muted small fw-bold">TOTAL CLEARED</span>
-            <h2 className="fw-bold text-success my-2" style={{ fontSize: '2.5rem' }}>
-              {clearedCount}
-            </h2>
-            <span className="badge bg-light text-secondary border">Resolved History</span>
-          </div>
-        </div>
-      </div>
-
-      {/* FILTER & SEARCH BAR (Alarm) */}
-      <div className="card p-3 mb-4 border-2 rounded-4 shadow-sm bg-white">
-        <div className="row g-3">
-          <div className="col-md-4">
-            <div className="input-group">
-              <span className="input-group-text bg-white border-2 text-muted"><i className="bi bi-search"></i></span>
-              <input 
-                type="text" 
-                className="form-control border-2" 
-                placeholder="ค้นหา Machine, Error Code..." 
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
-          </div>
-          <div className="col-md-8 d-flex justify-content-md-end">
-            <div className="bg-light p-1 rounded-pill border d-inline-flex">
-              <button 
-                className={`btn btn-sm rounded-pill px-4 fw-bold ${filterStatus === 'All' ? 'btn-primary' : 'btn-light text-muted border-0'}`}
-                onClick={() => setFilterStatus('All')}
-              >
-                All Records
-              </button>
-              <button 
-                className={`btn btn-sm rounded-pill px-4 fw-bold ${filterStatus === 'Active' ? 'btn-danger' : 'btn-light text-muted border-0'}`}
-                onClick={() => setFilterStatus('Active')}
-              >
-                Active 🚨
-              </button>
-              <button 
-                className={`btn btn-sm rounded-pill px-4 fw-bold ${filterStatus === 'Cleared' ? 'btn-success' : 'btn-light text-muted border-0'}`}
-                onClick={() => setFilterStatus('Cleared')}
-              >
-                Cleared ✅
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ALARM TABLE */}
-      <div className="card border-2 rounded-4 shadow-sm bg-white">
-        <div className="card-header bg-white py-3 border-bottom d-flex justify-content-between align-items-center">
-          <strong className="text-primary"><i className="bi bi-list-ul me-2"></i> Alarm History</strong>
-          <span className="text-muted small">Showing {filteredAlarms.length} records</span>
-        </div>
-        <div className="table-responsive">
-          <table className="table table-hover mb-0 align-middle text-center">
-            <thead style={{ backgroundColor: 'var(--bg-main)' }}>
-              <tr className="text-secondary small">
-                <th>Time</th>
-                <th>Alarm ID</th>
-                <th>Machine</th>
-                <th>Error Code</th>
-                <th className="text-start">Description</th>
-                <th>Severity</th>
-                <th>Status</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredAlarms.length > 0 ? (
-                filteredAlarms.map((alarm) => (
-                  <tr key={alarm.id} className={alarm.status === 'Active' ? 'table-danger' : ''}>
-                    <td className="text-muted small">{alarm.timestamp}</td>
-                    <td className="fw-bold text-secondary">{alarm.id}</td>
-                    <td className="fw-bold text-primary">{alarm.machine}</td>
-                    <td><span className="badge bg-dark">{alarm.code}</span></td>
-                    <td className="text-start fw-bold text-danger">{alarm.message}</td>
-                    <td>
-                      <span className={`badge ${
-                        alarm.severity === 'High' ? 'bg-danger' : 
-                        alarm.severity === 'Medium' ? 'bg-warning text-dark' : 'bg-info text-dark'
-                      }`}>
-                        {alarm.severity}
-                      </span>
-                    </td>
-                    <td>
-                      {alarm.status === 'Active' ? (
-                        <span className="badge bg-danger rounded-pill px-3 animate__animated animate__pulse animate__infinite">
-                          <i className="bi bi-exclamation-circle me-1"></i> ACTIVE
-                        </span>
-                      ) : (
-                        <span className="badge bg-success rounded-pill px-3">
-                          <i className="bi bi-check-circle me-1"></i> CLEARED
-                        </span>
-                      )}
-                    </td>
-                    <td>
-                      {alarm.status === 'Active' ? (
-                        <button 
-                          className="btn btn-sm btn-outline-danger fw-bold"
-                          onClick={() => handleAcknowledge(alarm.id)}
-                        >
-                          ACK / Clear
-                        </button>
-                      ) : (
-                        <span className="text-muted small"><i className="bi bi-check2-all text-success"></i> Done</span>
-                      )}
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan="8" className="py-5 text-muted">
-                    <i className="bi bi-shield-check display-4 d-block mb-2 text-success"></i>
-                    No alarms found matching your criteria.
-                  </td>
-                </tr>
               )}
-            </tbody>
-          </table>
+            </div>
+          </div>
         </div>
-      </div>
 
+      </div>
     </div>
   );
 }
