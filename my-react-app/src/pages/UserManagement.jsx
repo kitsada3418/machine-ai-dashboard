@@ -1,50 +1,71 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 function UserManagement() {
-  // รายการหน้าเพจทั้งหมดในระบบสำหรับให้เลือก
   const availablePages = [
     { id: 'dashboard', label: 'Dashboard' },
-    { id: 'graphs', label: 'Graphs & Analytics' },
+    { id: 'graphs', label: 'Graphs' },
     { id: 'logs', label: 'Machine Logs' },
+    { id: 'alarms', label: 'Alarm Log' },
+    { id: 'report', label: 'Reports' },
+    { id: 'maintenance', label: 'Maintenance Log' },
+    { id: 'oee_dashboard', label: 'OEE Dashboard' },
     { id: 'layout', label: 'Factory Layout' },
     { id: 'free_layout', label: 'Free Layout Builder' },
     { id: 'supervisor', label: 'Supervisor View' },
     { id: 'manager', label: 'File & Settings Manager' },
     { id: 'oee', label: 'OEE Dashboard' },
-    { id: 'maintenance', label: 'Maintenance Log' }
+    // 📌 เพิ่ม 2 บรรทัดนี้เข้าไปให้ตรงกับ App.js
+    { id: 'user_management', label: 'User Management' },
+    { id: 'system_logs', label: 'System Logs' }
   ];
 
-  // State สำหรับเก็บรายการ Role / ตำแหน่ง (เริ่มต้นมี 3 ค่าหลัก)
-  const [roles, setRoles] = useState([
-    { value: 'admin', label: 'Admin (ผู้ดูแลสูงสุด)' },
-    { value: 'supervisor', label: 'Supervisor (หัวหน้างาน)' },
-    { value: 'user', label: 'User (พนักงานทั่วไป)' }
-  ]);
+  const [roles, setRoles] = useState([]);
+  const [users, setUsers] = useState([]);
 
-  const [users, setUsers] = useState([
-    { 
-      id: 1, username: 'admin', password: 'AdminPassword123', role: 'admin', status: 'Active',
-      permissions: ['dashboard', 'graphs', 'logs', 'layout', 'free_layout', 'supervisor', 'manager', 'oee', 'maintenance'] 
-    },
-    { 
-      id: 2, username: 'supervisor1', password: 'SupPassword456', role: 'supervisor', status: 'Active',
-      permissions: ['dashboard', 'graphs', 'logs', 'layout', 'supervisor', 'oee', 'maintenance'] 
-    },
-    { 
-      id: 3, username: 'operator_A', password: 'Password789', role: 'user', status: 'Active',
-      permissions: ['dashboard', 'logs', 'layout', 'maintenance'] 
-    },
-  ]);
-
+  // State สำหรับฟอร์ม (รองรับทั้งเพิ่ม และแก้ไข)
+  const [editingId, setEditingId] = useState(null); 
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState('user');
-  const [newPermissions, setNewPermissions] = useState(['dashboard']);
-  const [showPasswords, setShowPasswords] = useState({});
+  const [newPermissions, setNewPermissions] = useState(availablePages.map(p => p.id));
 
-  const toggleShowPassword = (id) => {
-    setShowPasswords(prev => ({ ...prev, [id]: !prev[id] }));
+  // ฟังก์ชันดึง Token สำหรับแนบไปกับ API ทุกตัว
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('token');
+    return {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    };
   };
+
+  const fetchData = async () => {
+    try {
+      const [usersRes, rolesRes] = await Promise.all([
+        fetch('http://localhost:5000/api/users', { headers: getAuthHeaders() }),  
+        fetch('http://localhost:5000/api/roles', { headers: getAuthHeaders() })
+      ]);
+
+      if (usersRes.ok) {
+        const usersData = await usersRes.json();
+        const formattedUsers = usersData.map(u => ({
+          ...u,
+          permissions: typeof u.permissions === 'string' ? JSON.parse(u.permissions) : (u.permissions || [])
+        }));
+        setUsers(formattedUsers);
+      }
+
+      if (rolesRes.ok) {
+        const rolesData = await rolesRes.json();
+        setRoles(rolesData);
+      }
+    } catch (error) {
+      console.error('Error fetching data:', error);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
 
   const handlePermissionChange = (pageId) => {
     setNewPermissions(prev => 
@@ -52,64 +73,173 @@ function UserManagement() {
     );
   };
 
-  // ฟังก์ชันสำหรับเพิ่มตำแหน่ง (Role) ใหม่ด้วยตัวเอง
-  const handleAddCustomRole = () => {
-    const customRoleName = window.prompt('ระบุชื่อตำแหน่งใหม่ (เช่น Manager, Engineer, QC):');
-    if (customRoleName && customRoleName.trim() !== '') {
-      const roleValue = customRoleName.trim().toLowerCase().replace(/\s+/g, '_'); // สร้าง value แบบไม่มีช่องว่าง
-      
-      // ตรวจสอบว่ามีชื่อนี้อยู่แล้วหรือยัง
-      if (roles.some(r => r.value === roleValue)) {
-        alert('มีตำแหน่งนี้อยู่ในระบบแล้วครับ');
-        return;
-      }
-
-      const newRoleObj = { value: roleValue, label: customRoleName.trim() };
-      setRoles([...roles, newRoleObj]);
-      setNewRole(roleValue); // เลือกตำแหน่งที่เพิ่งสร้างให้อัตโนมัติ
+  const handleSelectAllPermissions = () => {
+    if (newPermissions.length === availablePages.length) {
+      setNewPermissions([]); 
+    } else {
+      setNewPermissions(availablePages.map(p => p.id)); 
     }
   };
 
-  const handleAddUser = (e) => {
-    e.preventDefault();
-    if (!newUsername || !newPassword) {
-      alert('กรุณากรอกชื่อผู้ใช้งานและรหัสผ่านให้ครบถ้วน');
-      return;
+  const handleAddCustomRole = async () => {
+    const customRoleName = window.prompt('ระบุชื่อตำแหน่งใหม่ (เช่น Manager, Engineer, QC):');
+    if (customRoleName && customRoleName.trim() !== '') {
+      const roleValue = customRoleName.trim().toLowerCase().replace(/\s+/g, '_');
+      try {
+        const response = await fetch('http://localhost:5000/api/roles', {
+          method: 'POST',
+          headers: getAuthHeaders(), // 🔑 ใส่ Token
+          body: JSON.stringify({ value: roleValue, label: customRoleName.trim() })
+        });
+
+        if (response.ok) {
+          alert('เพิ่มตำแหน่งสำเร็จ');
+          fetchData(); 
+          setNewRole(roleValue);
+        } else {
+          const err = await response.json();
+          alert(err.message || 'ไม่สามารถเพิ่มตำแหน่งได้');
+        }
+      } catch (error) {
+        console.error('Error adding role:', error);
+      }
     }
-    const newUser = {
-      id: users.length > 0 ? Math.max(...users.map(u => u.id)) + 1 : 1,
-      username: newUsername,
-      password: newPassword,
-      role: newRole,
-      status: 'Active',
-      permissions: newPermissions
-    };
-    setUsers([...users, newUser]);
-    
+  };
+
+  // กดปุ่มแก้ไขเพื่อดึงข้อมูลมาใส่ฟอร์มด้านซ้าย
+  const handleEditClick = (user) => {
+    setEditingId(user.id);
+    setNewUsername(user.username);
+    setNewPassword(''); // ไม่บังคับกรอกรหัสผ่านตอนแก้สิทธิ์
+    setNewRole(user.role);
+    setNewPermissions(user.permissions);
+  };
+
+  // ยกเลิกการแก้ไข
+  const handleCancelEdit = () => {
+    setEditingId(null);
     setNewUsername('');
     setNewPassword('');
     setNewRole('user');
-    setNewPermissions(['dashboard']);
+    setNewPermissions(availablePages.map(p => p.id));
   };
 
-  const handleDeleteUser = (id) => {
-    if (window.confirm('ยืนยันการลบผู้ใช้นี้?')) {
-      setUsers(users.filter(u => u.id !== id));
+  // บันทึกข้อมูล (แยกเคสสร้างใหม่ กับ อัปเดตสิทธิ์/ตำแหน่ง)
+  const handleSubmitForm = async (e) => {
+    e.preventDefault();
+    if (!newUsername) {
+      alert('กรุณากรอกชื่อผู้ใช้งาน');
+      return;
+    }
+
+    try {
+      if (editingId) {
+        // อัปเดตข้อมูล (Role / Permissions) ของผู้ใช้ที่มีอยู่
+        const response = await fetch(`http://localhost:5000/api/users/${editingId}`, {
+          method: 'PUT',
+          headers: getAuthHeaders(), // 🔑 ใส่ Token
+          body: JSON.stringify({
+            role: newRole,
+            permissions: newPermissions,
+            actionBy: 'admin'
+          })
+        });
+
+        if (response.ok) {
+          alert('อัปเดตสิทธิ์และตำแหน่งสำเร็จ');
+          handleCancelEdit();
+          fetchData();
+        } else {
+          const err = await response.json();
+          alert(err.message || 'ไม่สามารถอัปเดตข้อมูลได้');
+        }
+      } else {
+        // สร้างผู้ใช้ใหม่
+        if (!newPassword) {
+          alert('กรุณากรอกรหัสผ่านสำหรับผู้ใช้ใหม่');
+          return;
+        }
+
+        const response = await fetch('http://localhost:5000/api/users', {
+          method: 'POST',
+          headers: getAuthHeaders(), // 🔑 ใส่ Token
+          body: JSON.stringify({
+            username: newUsername,
+            password: newPassword,
+            role: newRole,
+            permissions: newPermissions,
+            actionBy: 'admin' 
+          })
+        });
+
+        if (response.ok) {
+          alert('สร้างผู้ใช้งานสำเร็จ');
+          handleCancelEdit();
+          fetchData(); 
+        } else {
+          const err = await response.json();
+          alert(err.message || 'เกิดข้อผิดพลาด');
+        }
+      }
+    } catch (error) {
+      console.error('Error saving user:', error);
     }
   };
 
-  // ฟังก์ชันช่วยกำหนดสีของ Badge ตำแหน่ง
+  // ฟังก์ชันรีเซ็ตรหัสผ่าน (เปลี่ยนผ่านปุ่มกุญแจ)
+  const handleResetPassword = async (userId, username) => {
+    const newPass = window.prompt(`ระบุรหัสผ่านใหม่สำหรับผู้ใช้ [ ${username} ]:`);
+    if (newPass && newPass.trim() !== '') {
+      try {
+        const response = await fetch(`http://localhost:5000/api/users/${userId}/reset-password`, {
+          method: 'PUT',
+          headers: getAuthHeaders(), // 🔑 ใส่ Token
+          body: JSON.stringify({ newPassword: newPass.trim(), actionBy: 'admin' })
+        });
+
+        if (response.ok) {
+          alert('รีเซ็ตรหัสผ่านสำเร็จเรียบร้อยแล้ว');
+        } else {
+          const err = await response.json();
+          alert(err.message || 'ไม่สามารถรีเซ็ตรหัสผ่านได้');
+        }
+      } catch (error) {
+        console.error('Error resetting password:', error);
+      }
+    }
+  };
+
+  const handleDeleteUser = async (id) => {
+    if (window.confirm('ยืนยันการลบผู้ใช้นี้?')) {
+      try {
+        const response = await fetch(`http://localhost:5000/api/users/${id}?actionBy=admin`, {
+          method: 'DELETE',
+          headers: getAuthHeaders() // 🔑 ใส่ Token
+        });
+
+        if (response.ok) {
+          alert('ลบผู้ใช้งานสำเร็จ');
+          fetchData();
+        } else {
+          alert('ไม่สามารถลบผู้ใช้งานได้');
+        }
+      } catch (error) {
+        console.error('Error deleting user:', error);
+      }
+    }
+  };
+
   const getRoleBadgeColor = (roleValue) => {
     switch (roleValue) {
       case 'admin': return 'bg-danger';
       case 'supervisor': return 'bg-warning text-dark';
       case 'user': return 'bg-secondary';
-      default: return 'bg-primary'; // สีสำหรับตำแหน่งที่เพิ่มเข้ามาใหม่
+      default: return 'bg-primary';
     }
   };
 
   return (
-    <div className="animate__animated animate__fadeIn">
+    <div className="animate__animated animate__fadeIn container-fluid p-4">
       <div className="d-flex justify-content-between align-items-center mb-4">
         <div>
           <h2 className="fw-bold mb-1" style={{ color: 'var(--text-primary)' }}>👤 Admin User Management</h2>
@@ -118,21 +248,47 @@ function UserManagement() {
       </div>
 
       <div className="row g-4">
-        {/* ADD USER FORM */}
+        {/* ADD / EDIT USER FORM */}
         <div className="col-lg-4">
           <div className="card border-2 rounded-4 shadow-sm p-4 bg-white">
-            <h5 className="fw-bold mb-3 text-primary"><i className="bi bi-person-plus-fill me-2"></i> Add New User</h5>
-            <form onSubmit={handleAddUser}>
+            <div className="d-flex justify-content-between align-items-center mb-3">
+              <h5 className="fw-bold text-primary m-0">
+                <i className={`bi ${editingId ? 'bi-pencil-square' : 'bi-person-plus-fill'} me-2`}></i> 
+                {editingId ? 'Edit User Permissions' : 'Add New User'}
+              </h5>
+              {editingId && (
+                <button className="btn btn-sm btn-outline-secondary py-0" onClick={handleCancelEdit}>
+                  ยกเลิก
+                </button>
+              )}
+            </div>
+
+            <form onSubmit={handleSubmitForm}>
               <div className="mb-3">
                 <label className="form-label fw-bold small">Username</label>
-                <input type="text" className="form-control border-2" placeholder="ชื่อผู้ใช้งาน..." value={newUsername} onChange={(e) => setNewUsername(e.target.value)} />
+                <input 
+                  type="text" 
+                  className="form-control border-2" 
+                  placeholder="ชื่อผู้ใช้งาน..." 
+                  value={newUsername} 
+                  onChange={(e) => setNewUsername(e.target.value)} 
+                  disabled={editingId !== null} 
+                />
               </div>
-              <div className="mb-3">
-                <label className="form-label fw-bold small">Password</label>
-                <input type="text" className="form-control border-2" placeholder="รหัสผ่าน..." value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
-              </div>
+
+              {!editingId && (
+                <div className="mb-3">
+                  <label className="form-label fw-bold small">Password</label>
+                  <input 
+                    type="password" 
+                    className="form-control border-2" 
+                    placeholder="รหัสผ่าน..." 
+                    value={newPassword} 
+                    onChange={(e) => setNewPassword(e.target.value)} 
+                  />
+                </div>
+              )}
               
-              {/* SECTION: Role พร้อมปุ่มเพิ่มตำแหน่งใหม่ */}
               <div className="mb-3">
                 <div className="d-flex justify-content-between align-items-center mb-1">
                   <label className="form-label fw-bold small m-0">Role / ระดับตำแหน่ง</label>
@@ -147,12 +303,22 @@ function UserManagement() {
                 </select>
               </div>
 
-              {/* SECTION: กำหนดสิทธิ์เข้าถึงหน้าเว็บ */}
               <div className="mb-4">
-                <label className="form-label fw-bold small text-primary border-bottom pb-1 w-100">
-                  <i className="bi bi-ui-checks-grid me-1"></i> Page Permissions (สิทธิ์เข้าถึง)
-                </label>
-                <div className="row g-2 mt-1">
+                <div className="d-flex justify-content-between align-items-center border-bottom pb-1 mb-2">
+                  <label className="form-label fw-bold small text-primary m-0">
+                    <i className="bi bi-ui-checks-grid me-1"></i> Page Permissions ({newPermissions.length}/{availablePages.length})
+                  </label>
+                  <button 
+                    type="button" 
+                    className="btn btn-sm btn-link p-0 text-decoration-none fw-bold" 
+                    onClick={handleSelectAllPermissions}
+                    style={{ fontSize: '0.75rem' }}
+                  >
+                    {newPermissions.length === availablePages.length ? 'ยกเลิกทั้งหมด' : 'เลือกทั้งหมด'}
+                  </button>
+                </div>
+
+                <div className="row g-2 mt-1" style={{ maxHeight: '200px', overflowY: 'auto' }}>
                   {availablePages.map(page => (
                     <div className="col-6" key={page.id}>
                       <div className="form-check">
@@ -172,8 +338,8 @@ function UserManagement() {
                 </div>
               </div>
 
-              <button type="submit" className="btn btn-primary w-100 fw-bold py-2 rounded-3">
-                Create User
+              <button type="submit" className={`btn ${editingId ? 'btn-success' : 'btn-primary'} w-100 fw-bold py-2 rounded-3`}>
+                {editingId ? 'Update Changes' : 'Create User'}
               </button>
             </form>
           </div>
@@ -190,59 +356,74 @@ function UserManagement() {
                 <thead style={{ backgroundColor: 'var(--bg-main)' }}>
                   <tr className="text-secondary small">
                     <th style={{ width: '5%' }}>#</th>
-                    <th style={{ width: '15%' }}>Username</th>
-                    <th style={{ width: '15%' }}>Password</th>
+                    <th style={{ width: '20%' }}>Username</th>
+                    <th style={{ width: '18%' }}>Password Status</th>
                     <th style={{ width: '15%' }}>Role</th>
-                    <th style={{ width: '40%' }}>Accessible Pages (สิทธิ์เข้าถึง)</th>
+                    <th style={{ width: '32%' }}>Accessible Pages</th>
                     <th style={{ width: '10%' }}>Action</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {users.map((u, idx) => {
-                    // หาชื่อ label ของตำแหน่งมาแสดงผล
-                    const roleLabel = roles.find(r => r.value === u.role)?.label || u.role;
-                    
-                    return (
-                    <tr key={u.id}>
-                      <td className="fw-bold text-muted">{idx + 1}</td>
-                      <td className="fw-bold text-primary">{u.username}</td>
-                      <td>
-                        <div className="d-flex align-items-center justify-content-center gap-1">
-                          <code className="fs-6 fw-bold text-dark bg-light px-2 py-1 rounded" style={{ fontSize: '0.8rem' }}>
-                            {showPasswords[u.id] ? u.password : '••••••••'}
-                          </code>
-                          <button 
-                            className="btn btn-sm btn-outline-secondary border-0 p-1" 
-                            onClick={() => toggleShowPassword(u.id)}
-                            title={showPasswords[u.id] ? "ซ่อนรหัสผ่าน" : "แสดงรหัสผ่าน"}
-                          >
-                            <i className={`bi ${showPasswords[u.id] ? 'bi-eye-slash-fill text-danger' : 'bi-eye-fill text-primary'}`}></i>
-                          </button>
-                        </div>
-                      </td>
-                      <td>
-                        <span className={`badge ${getRoleBadgeColor(u.role)}`}>
-                          {roleLabel.toUpperCase()}
-                        </span>
-                      </td>
-                      <td>
-                        <div className="d-flex flex-wrap justify-content-center gap-1" style={{ maxWidth: '300px', margin: '0 auto' }}>
-                          {u.permissions.map(perm => (
-                            <span key={perm} className="badge bg-light text-secondary border" style={{ fontSize: '0.65rem' }}>
-                              {availablePages.find(p => p.id === perm)?.label || perm}
-                            </span>
-                          ))}
-                        </div>
-                      </td>
-                      <td>
-                        {u.username !== 'admin' && (
-                          <button className="btn btn-sm btn-outline-danger border-0" onClick={() => handleDeleteUser(u.id)} title="Delete User">
-                            <i className="bi bi-trash-fill"></i>
-                          </button>
-                        )}
-                      </td>
+                  {users.length === 0 ? (
+                    <tr>
+                      <td colSpan="6" className="text-center py-4 text-muted">ไม่พบข้อมูลผู้ใช้งาน</td>
                     </tr>
-                  )})}
+                  ) : (
+                    users.map((u, idx) => {
+                      const roleLabel = roles.find(r => r.value === u.role)?.label || u.role;
+                      
+                      return (
+                        <tr key={u.id}>
+                          <td className="fw-bold text-muted">{idx + 1}</td>
+                          <td className="fw-bold text-primary">{u.username}</td>
+                          <td>
+                            <span className="badge bg-success-subtle text-success border border-success-subtle px-2 py-1">
+                              🔒 Hashed (Secure)
+                            </span>
+                          </td>
+                          <td>
+                            <span className={`badge ${getRoleBadgeColor(u.role)}`}>
+                              {roleLabel ? roleLabel.toUpperCase() : u.role}
+                            </span>
+                          </td>
+                          <td>
+                            <div className="d-flex flex-wrap justify-content-center gap-1" style={{ maxWidth: '280px', margin: '0 auto' }}>
+                              {[...new Set(u.permissions)].map(perm => (
+                                <span key={perm} className="badge bg-light text-secondary border" style={{ fontSize: '0.65rem' }}>
+                                  {availablePages.find(p => p.id === perm)?.label || perm}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                          <td>
+                            <div className="d-flex justify-content-center gap-1">
+                              <button 
+                                className="btn btn-sm btn-outline-primary border-0" 
+                                onClick={() => handleEditClick(u)} 
+                                title="Edit User Permissions"
+                              >
+                                <i className="bi bi-pencil-fill"></i>
+                              </button>
+
+                              <button 
+                                className="btn btn-sm btn-outline-warning border-0" 
+                                onClick={() => handleResetPassword(u.id, u.username)} 
+                                title="Reset Password"
+                              >
+                                <i className="bi bi-key-fill text-warning"></i>
+                              </button>
+                              
+                              {u.username !== 'admin' && (
+                                <button className="btn btn-sm btn-outline-danger border-0" onClick={() => handleDeleteUser(u.id)} title="Delete User">
+                                  <i className="bi bi-trash-fill"></i>
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>

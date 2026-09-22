@@ -2,30 +2,27 @@ import React, { useState, useEffect } from 'react';
 
 function Report() {
   // ================= STATE =================
-  const [reportMode, setReportMode] = useState('machine'); // 'machine' หรือ 'employee'
-  const [reportType, setReportType] = useState('hourly'); // 'hourly', 'daily', 'monthly', 'summary'
+  const [reportType, setReportType] = useState('daily'); // 'daily', 'monthly', 'summary'
   const [reportDate, setReportDate] = useState(new Date().toISOString().split('T')[0]);
-  const [filterTarget, setFilterTarget] = useState('all'); // เลือกเครื่อง/พนักงานเฉพาะเจาะจง
+  const [filterTarget, setFilterTarget] = useState('all'); // เลือกพนักงานเฉพาะเจาะจง
   
   // Options สำหรับ Dropdown
-  const [machineOptions, setMachineOptions] = useState([]);
   const [employeeOptions, setEmployeeOptions] = useState([]);
 
   const [reportData, setReportData] = useState([]);
-  const [summaryData, setSummaryData] = useState({ totalOk: 0, totalNg: 0, avgOee: 0 });
+  const [summaryData, setSummaryData] = useState({ 
+    totalEmployees: 0, 
+    totalJobs: 0, 
+    totalOk: 0,
+    totalDowntimeMins: 0 
+  });
   const [loading, setLoading] = useState(false);
 
   // ================= FETCH DROPDOWN OPTIONS =================
   const fetchDropdownOptions = async () => {
     try {
-      const [mhRes, empRes] = await Promise.all([
-        fetch('http://localhost:5000/api/production/selectData?mhId_All=true'),
-        fetch('http://localhost:5000/api/production/selectData?empId_All=true')
-      ]);
-      const mhData = await mhRes.json();
+      const empRes = await fetch('http://localhost:5000/api/production/selectData?empId_All=true');
       const empData = await empRes.json();
-
-      setMachineOptions(mhData.map(item => item.Mh_ID || item.mh_id || Object.values(item)[0]));
       setEmployeeOptions(empData.map(item => item.Emp_ID || item.emp_id || Object.values(item)[0]));
     } catch (error) {
       console.error('Error fetching dropdown options:', error);
@@ -34,13 +31,8 @@ function Report() {
 
   useEffect(() => {
     fetchDropdownOptions();
-  }, []);
-
-  // เมื่อเปลี่ยนโหมด (MH/EMP) ให้รีเซ็ตค่า Target เป็น 'all'
-  useEffect(() => {
-    setFilterTarget('all');
     generateReport();
-  }, [reportMode]);
+  }, []);
 
   // ================= FETCH DATA & PROCESS =================
   const generateReport = async () => {
@@ -50,160 +42,120 @@ function Report() {
       let formattedDate = reportDate;
       if (reportType === 'monthly') formattedDate = reportDate.slice(0, 7); // YYYY-MM
       if (reportType === 'summary') formattedDate = reportDate.slice(0, 4); // YYYY
-      // สำหรับ hourly และ daily ใช้เต็ม YYYY-MM-DD
 
       const queryParams = new URLSearchParams();
       queryParams.append('date', formattedDate);
-      
-      // ส่งค่า Filter เจาะจงเครื่อง/พนักงาน (ถ้ามีการเลือก)
       if (filterTarget !== 'all') {
-        if (reportMode === 'machine') queryParams.append('mhId', filterTarget);
-        else queryParams.append('empId', filterTarget);
+        queryParams.append('empId', filterTarget);
       }
 
-      // 2. ดึงข้อมูลจาก API
+      // 2. ดึงข้อมูลจาก API (สมมติว่า API ดึงข้อมูล log + downtime มาให้แล้ว)
       const response = await fetch(`http://localhost:5000/api/datalog?${queryParams.toString()}`);
       if (!response.ok) throw new Error('Failed to fetch report data');
       const data = await response.json();
 
       const groupedData = {};
+      const allUniqueJobs = new Set();
       let totalOverallOk = 0;
-      let totalOverallNg = 0;
+      let totalOverallDowntime = 0;
 
-      // สร้างโครงสร้างเวลา 24 ชั่วโมงรอไว้ (สำหรับโหมดรายชั่วโมง)
-      if (reportType === 'hourly') {
-        for(let i = 0; i < 24; i++) {
-          const hStart = String(i).padStart(2, '0');
-          const hEnd = String((i + 1) % 24).padStart(2, '0');
-          const timeLabel = `${hStart}:00 - ${hEnd}:00`;
-          groupedData[timeLabel] = { target: timeLabel, ok: 0, ng: 0, sortIdx: i };
-        }
-      }
-
-      // 3. วนลูปจัดกลุ่มข้อมูล
+      // 3. วนลูปจัดกลุ่มข้อมูลตามพนักงาน (Emp_ID)
       data.forEach(item => {
-        let key = '';
-        
-        if (reportType === 'hourly') {
-          // จัดกลุ่มตามชั่วโมงที่บันทึก
-          const hour = new Date(item.Start_Time).getHours();
-          const hStart = String(hour).padStart(2, '0');
-          const hEnd = String((hour + 1) % 24).padStart(2, '0');
-          key = `${hStart}:00 - ${hEnd}:00`;
-        } else {
-          // จัดกลุ่มตามชื่อเครื่อง หรือ ชื่อพนักงาน
-          key = reportMode === 'machine' ? item.Mh_ID : item.Emp_ID;
-        }
+        const empId = item.Emp_ID || 'Unknown';
 
-        if (!key) return;
-
-        if (!groupedData[key]) {
-          groupedData[key] = { target: key, ok: 0, ng: 0 };
+        if (!groupedData[empId]) {
+          groupedData[empId] = { 
+            empId: empId, 
+            jobs: new Set(), 
+            ok: 0, 
+            workHours: 0, // ชั่วโมงการทำงานรวม
+            downtimeCount: 0, // จำนวนครั้งที่หลุด
+            downtimeMins: 0 // นาทีที่หลุดรวม
+          };
         }
         
-        groupedData[key].ok += Number(item.OK) || 0;
-        groupedData[key].ng += Number(item.NG) || 0;
+        // เพิ่ม Job เข้า Set เพื่อใช้นับจำนวนจ็อบที่ไม่ซ้ำกัน
+        if (item.Job_ID) {
+            groupedData[empId].jobs.add(item.Job_ID);
+            allUniqueJobs.add(item.Job_ID);
+        }
+        
+        groupedData[empId].ok += Number(item.OK) || 0;
+        
+        // *หมายเหตุ: ต้องแน่ใจว่า API ส่งค่า Work_Hours, Downtime_Count, Downtime_Mins มาให้ด้วย
+        groupedData[empId].workHours += Number(item.Work_Hours) || 1; // สมมติว่า 1 log = 1 ชั่วโมง
+        groupedData[empId].downtimeCount += Number(item.Downtime_Count) || 0;
+        groupedData[empId].downtimeMins += Number(item.Downtime_Mins) || 0;
         
         totalOverallOk += Number(item.OK) || 0;
-        totalOverallNg += Number(item.NG) || 0;
+        totalOverallDowntime += Number(item.Downtime_Mins) || 0;
       });
 
-      // 4. แปลงข้อมูลและคำนวณ OEE/Efficiency
+      // 4. แปลงข้อมูลและคำนวณค่าเฉลี่ย
       let finalArray = Object.values(groupedData).map((group, index) => {
-        const totalOutput = group.ok + group.ng;
-        const efficiencyRate = totalOutput > 0 ? (group.ok / totalOutput) * 100 : 0;
+        const jobCount = group.jobs.size;
+        const avgPerHour = group.workHours > 0 ? (group.ok / group.workHours) : group.ok;
 
         let status = 'Normal';
-        if (totalOutput === 0) status = 'No Data';
-        else if (efficiencyRate >= 95) status = 'Excellent';
-        else if (efficiencyRate < 85) status = 'Warning';
+        if (group.downtimeCount >= 3 || group.downtimeMins >= 60) status = 'Warning'; // หลุดบ่อย หรือ นานเกิน 1 ชม.
+        if (jobCount === 0 && group.ok === 0) status = 'No Data';
 
         return {
           id: index + 1,
-          target: group.target,
-          shift: reportType === 'hourly' ? reportDate : (reportType === 'daily' ? 'All Shifts (Daily)' : 'Accumulation'),
+          empId: group.empId,
+          jobCount: jobCount,
           totalOk: group.ok,
-          totalNg: group.ng,
-          efficiency: efficiencyRate,
-          status: status,
-          sortIdx: group.sortIdx !== undefined ? group.sortIdx : 0
+          avgPerHour: Math.round(avgPerHour), // ปัดเศษ
+          downtimeCount: group.downtimeCount,
+          downtimeMins: group.downtimeMins,
+          status: status
         };
       });
 
-      // 5. จัดเรียงและกรองข้อมูล
-      if (reportType === 'hourly') {
-        finalArray.sort((a, b) => a.sortIdx - b.sortIdx);
-        // ซ่อนชั่วโมงที่ไม่มีการผลิตเลย เพื่อให้ตารางสะอาดตา
-        finalArray = finalArray.filter(item => item.totalOk > 0 || item.totalNg > 0);
-        // รัน ID ใหม่
-        finalArray.forEach((item, i) => item.id = i + 1);
-      } else {
-        // เรียงตามยอด OK จากมากไปน้อย
-        finalArray.sort((a, b) => b.totalOk - a.totalOk);
-        // กรองคน/เครื่องที่ไม่มีข้อมูลออกเช่นกัน
-        finalArray = finalArray.filter(item => item.totalOk > 0 || item.totalNg > 0);
-      }
+      // 5. จัดเรียงตามยอดผลิตรวมจากมากไปน้อย
+      finalArray.sort((a, b) => b.totalOk - a.totalOk);
+      // กรองเฉพาะคนที่มีการทำงาน
+      finalArray = finalArray.filter(item => item.totalOk > 0 || item.jobCount > 0);
+      finalArray.forEach((item, i) => item.id = i + 1); // รัน ID ใหม่
 
-      // 6. อัปเดต Summary เฉพาะรายการที่มีข้อมูลจริง
-      const activeCount = finalArray.length;
-      const sumEfficiency = finalArray.reduce((acc, curr) => acc + curr.efficiency, 0);
-
+      // 6. อัปเดต Summary
       setReportData(finalArray);
       setSummaryData({
+        totalEmployees: finalArray.length,
+        totalJobs: allUniqueJobs.size,
         totalOk: totalOverallOk,
-        totalNg: totalOverallNg,
-        avgOee: activeCount > 0 ? (sumEfficiency / activeCount) : 0
+        totalDowntimeMins: totalOverallDowntime
       });
 
     } catch (error) {
       console.error('Error generating report:', error);
       setReportData([]);
-      setSummaryData({ totalOk: 0, totalNg: 0, avgOee: 0 });
+      setSummaryData({ totalEmployees: 0, totalJobs: 0, totalOk: 0, totalDowntimeMins: 0 });
     } finally {
       setLoading(false);
     }
   };
 
   const handleExport = (format) => {
-    alert(`กำลังเตรียมดาวน์โหลดรายงานในรูปแบบไฟล์ .${format.toUpperCase()} ...`);
+    alert(`กำลังเตรียมดาวน์โหลดรายงานพนักงานรูปแบบ .${format.toUpperCase()} ...`);
   };
 
   return (
     <div className="animate__animated animate__fadeIn container-fluid p-4">
       
-      {/* ================= HEADER & TOGGLE MODE ================= */}
+      {/* ================= HEADER ================= */}
       <div className="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center mb-4 gap-3">
         <div>
-          <h2 className="fw-bold mb-1" style={{ color: 'var(--text-primary)' }}>📑 Production & Operation Report</h2>
+          <h2 className="fw-bold mb-1" style={{ color: 'var(--text-primary)' }}>👷 Employee Performance Report</h2>
           <span className="text-muted fs-6">
-            Viewing reports for: <strong>{reportMode === 'machine' ? '🤖 Machine (MH)' : '👷 Employee (EMP)'}</strong>
+            รายงานสรุปประสิทธิภาพการทำงานของพนักงาน และสถิติการขัดข้อง
           </span>
         </div>
 
-        <div className="d-flex align-items-center gap-3 flex-wrap">
-          <div className="bg-white p-1 rounded-pill shadow-sm border">
-            <button 
-              className={`btn rounded-pill px-4 fw-bold ${reportMode === 'machine' ? 'btn-primary' : 'btn-light text-muted border-0'}`}
-              onClick={() => setReportMode('machine')}
-            >
-              <i className="bi bi-robot me-1"></i> Machine (MH)
-            </button>
-            <button 
-              className={`btn rounded-pill px-4 fw-bold ${reportMode === 'employee' ? 'btn-success' : 'btn-light text-muted border-0'}`}
-              onClick={() => setReportMode('employee')}
-            >
-              <i className="bi bi-person-badge me-1"></i> Employee (EMP)
-            </button>
-          </div>
-
-          <div className="d-flex gap-2">
-            <button className="btn btn-outline-success fw-bold px-3 rounded-pill shadow-sm" onClick={() => handleExport('excel')}>
-              <i className="bi bi-file-earmark-excel-fill me-1"></i> Excel
-            </button>
-            <button className="btn btn-outline-danger fw-bold px-3 rounded-pill shadow-sm" onClick={() => handleExport('pdf')}>
-              <i className="bi bi-file-earmark-pdf-fill me-1"></i> PDF
-            </button>
-          </div>
+        <div className="d-flex align-items-center gap-2">
+          <button className="btn btn-outline-success fw-bold px-3 rounded-pill shadow-sm" onClick={() => handleExport('excel')}>
+            <i className="bi bi-file-earmark-excel-fill me-1"></i> Export Excel
+          </button>
         </div>
       </div>
 
@@ -211,38 +163,33 @@ function Report() {
       <div className="card p-3 mb-4 border-2 rounded-4 shadow-sm bg-white">
         <div className="row g-3 align-items-end">
           <div className="col-md-3">
-            <label className="form-label text-muted fw-bold small">REPORT TYPE</label>
+            <label className="form-label text-muted fw-bold small">REPORT PERIOD</label>
             <select className="form-select border-2 fw-bold" value={reportType} onChange={(e) => setReportType(e.target.value)}>
-              <option value="hourly">Hourly Report (สรุปรายชั่วโมง)</option>
-              <option value="daily">Daily Report (สรุปรายวัน)</option>
-              <option value="monthly">Monthly Report (สรุปรายเดือน)</option>
-              <option value="summary">Yearly / Summary (สรุปรายปี)</option>
+              <option value="daily">Daily (รายวัน)</option>
+              <option value="monthly">Monthly (รายเดือน)</option>
             </select>
           </div>
           
           <div className="col-md-3">
-            <label className="form-label text-muted fw-bold small">TARGET (FILTER)</label>
+            <label className="form-label text-muted fw-bold small">EMPLOYEE (พนักงาน)</label>
             <select className="form-select border-2 fw-bold text-primary" value={filterTarget} onChange={(e) => setFilterTarget(e.target.value)}>
-              <option value="all">All (รวมทั้งหมด)</option>
-              {reportMode === 'machine' 
-                ? machineOptions.map((mh, idx) => <option key={idx} value={mh}>{mh}</option>)
-                : employeeOptions.map((emp, idx) => <option key={idx} value={emp}>Emp: {emp}</option>)
-              }
+              <option value="all">All Employees (ทุกคน)</option>
+              {employeeOptions.map((emp, idx) => <option key={idx} value={emp}>Emp: {emp}</option>)}
             </select>
           </div>
 
           <div className="col-md-3">
             <label className="form-label text-muted fw-bold small">SELECT DATE</label>
             <input 
-              type="date" 
+              type={reportType === 'monthly' ? "month" : "date"}
               className="form-control border-2 fw-bold" 
-              value={reportDate} 
+              value={reportType === 'monthly' ? reportDate.slice(0,7) : reportDate} 
               onChange={(e) => setReportDate(e.target.value)} 
             />
           </div>
           <div className="col-md-3">
             <button className="btn btn-primary w-100 fw-bold py-2 rounded-3 shadow-sm" onClick={generateReport}>
-              <i className="bi bi-search me-1"></i> Generate Report
+              <i className="bi bi-search me-1"></i> ค้นหาข้อมูล
             </button>
           </div>
         </div>
@@ -250,93 +197,82 @@ function Report() {
 
       {/* ================= SUMMARY CARDS ================= */}
       <div className="row g-4 mb-4">
-        <div className="col-md-4">
-          <div className="card border-2 rounded-4 p-4 shadow-sm text-center bg-white h-100">
-            <span className="text-muted small fw-bold">TOTAL OUTPUT ({filterTarget === 'all' ? 'OVERALL' : filterTarget})</span>
-            <h2 className="fw-bold text-primary my-2" style={{ fontSize: '2.2rem' }}>
-              {summaryData.totalOk.toLocaleString()} <span className="fs-5 text-muted">Pcs</span>
-            </h2>
-            <span className="badge bg-success">Total OK Parts</span>
+        <div className="col-md-3">
+          <div className="card border-2 rounded-4 p-3 shadow-sm text-center bg-white h-100">
+            <span className="text-muted small fw-bold">พนักงานที่ขึ้นงาน</span>
+            <h2 className="fw-bold text-primary my-2">{summaryData.totalEmployees} <span className="fs-6 text-muted">คน</span></h2>
           </div>
         </div>
-        <div className="col-md-4">
-          <div className="card border-2 rounded-4 p-4 shadow-sm text-center bg-white h-100">
-            <span className="text-muted small fw-bold">TOTAL DEFECTIVE (NG)</span>
-            <h2 className={`fw-bold my-2 ${summaryData.totalNg > 0 ? 'text-danger' : 'text-success'}`} style={{ fontSize: '2.2rem' }}>
-              {summaryData.totalNg.toLocaleString()} <span className="fs-5 text-muted">Pcs</span>
-            </h2>
-            <span className="text-muted small">Total Defect Parts</span>
+        <div className="col-md-3">
+          <div className="card border-2 rounded-4 p-3 shadow-sm text-center bg-white h-100">
+            <span className="text-muted small fw-bold">จำนวนจ็อบทั้งหมด</span>
+            <h2 className="fw-bold text-success my-2">{summaryData.totalJobs} <span className="fs-6 text-muted">จ็อบ</span></h2>
           </div>
         </div>
-        <div className="col-md-4">
-          <div className="card border-2 rounded-4 p-4 shadow-sm text-center bg-white h-100">
-            <span className="text-muted small fw-bold">{reportMode === 'machine' ? 'AVERAGE OEE (YIELD)' : 'AVERAGE EFFICIENCY'}</span>
-            <h2 className="fw-bold text-info my-2" style={{ fontSize: '2.2rem' }}>
-              {summaryData.avgOee.toFixed(2)}%
+        <div className="col-md-3">
+          <div className="card border-2 rounded-4 p-3 shadow-sm text-center bg-white h-100">
+            <span className="text-muted small fw-bold">ยอดผลิตรวม (OK)</span>
+            <h2 className="fw-bold text-info my-2">{summaryData.totalOk.toLocaleString()} <span className="fs-6 text-muted">ชิ้น</span></h2>
+          </div>
+        </div>
+        <div className="col-md-3">
+          <div className="card border-2 rounded-4 p-3 shadow-sm text-center bg-white h-100">
+            <span className="text-muted small fw-bold">เวลาขัดข้องสะสม (Downtime)</span>
+            <h2 className={`fw-bold my-2 ${summaryData.totalDowntimeMins > 0 ? 'text-danger' : 'text-secondary'}`}>
+              {summaryData.totalDowntimeMins} <span className="fs-6 text-muted">นาที</span>
             </h2>
-            <span className={`badge ${summaryData.avgOee >= 85 ? 'bg-primary' : 'bg-warning text-dark'}`}>
-              System Average
-            </span>
           </div>
         </div>
       </div>
 
       {/* ================= REPORT TABLE ================= */}
       <div className="card border-2 rounded-4 shadow-sm bg-white">
-        <div className="card-header bg-white py-3 border-bottom d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div className="card-header bg-white py-3 border-bottom d-flex justify-content-between align-items-center">
           <strong className="text-primary fs-5">
-            <i className="bi bi-table me-2"></i> 
-            {reportType === 'hourly' ? 'Hourly Performance Breakdown' : (reportMode === 'machine' ? 'Machine Performance Summary' : 'Employee Production Summary')} 
-            <span className="badge bg-light border text-dark ms-2">{reportDate}</span>
+            <i className="bi bi-person-lines-fill me-2"></i> สถิติการทำงานรายบุคคล
           </strong>
-          <span className="text-muted small fw-bold">Showing {reportData.length} active records</span>
         </div>
         <div className="table-responsive">
           <table className="table table-hover mb-0 align-middle text-center">
             <thead className="table-light">
               <tr className="text-secondary small">
                 <th>#</th>
-                
-                {/* เปลี่ยนหัวข้อคอลัมน์อัตโนมัติตามโหมดที่เลือก */}
-                <th>
-                  {reportType === 'hourly' 
-                    ? 'Time Period (ช่วงเวลา)' 
-                    : (reportMode === 'machine' ? 'Machine ID' : 'Employee ID')}
-                </th>
-                
-                <th>{reportType === 'hourly' ? 'Date' : 'Period Scope'}</th>
-                <th>Total Output (OK)</th>
-                <th>Defect (NG)</th>
-                <th>{reportMode === 'machine' ? 'Yield / OEE' : 'Efficiency'}</th>
-                <th>Status</th>
+                <th>รหัสพนักงาน</th>
+                <th>จำนวนจ็อบ</th>
+                <th>ยอดผลิต (ชิ้น)</th>
+                <th>เฉลี่ยต่อชั่วโมง</th>
+                <th className="text-danger">หลุดกี่รอบ</th>
+                <th className="text-danger">รวมเวลาหลุด (นาที)</th>
+                <th>สถานะ</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="7" className="text-center py-5">
+                  <td colSpan="8" className="text-center py-5">
                     <div className="spinner-border text-primary" role="status"></div>
-                    <div className="mt-2 text-muted fw-bold">Generating Report Data...</div>
+                    <div className="mt-2 text-muted fw-bold">กำลังประมวลผลข้อมูล...</div>
                   </td>
                 </tr>
               ) : reportData.length === 0 ? (
                 <tr>
-                  <td colSpan="7" className="text-center py-5 text-muted fw-bold">
-                    📭 ไม่มีข้อมูลการผลิตในเงื่อนไขที่เลือก
+                  <td colSpan="8" className="text-center py-5 text-muted fw-bold">
+                    📭 ไม่มีข้อมูลการปฏิบัติงานในวันที่เลือก
                   </td>
                 </tr>
               ) : (
                 reportData.map((item) => (
                   <tr key={item.id}>
                     <td className="fw-bold text-muted">{item.id}</td>
-                    <td className="fw-bold text-primary">{item.target}</td>
-                    <td className="text-muted small">{item.shift}</td>
-                    <td className="fw-bold fs-6 text-success">{item.totalOk.toLocaleString()}</td>
-                    <td className="fw-bold text-danger">{item.totalNg.toLocaleString()}</td>
-                    <td className="fw-bold text-info">{item.efficiency.toFixed(2)}%</td>
+                    <td className="fw-bold text-primary fs-6">{item.empId}</td>
+                    <td className="fw-bold text-dark">{item.jobCount} <span className="small text-muted fw-normal">Jobs</span></td>
+                    <td className="fw-bold text-success">{item.totalOk.toLocaleString()}</td>
+                    <td className="fw-bold text-info">{item.avgPerHour.toLocaleString()} <span className="small text-muted fw-normal">/hr</span></td>
+                    <td className="fw-bold text-danger">{item.downtimeCount}</td>
+                    <td className="fw-bold text-danger">{item.downtimeMins} <span className="small fw-normal">m</span></td>
                     <td>
-                      <span className={`badge px-3 py-2 ${item.status === 'Excellent' ? 'bg-success' : item.status === 'Normal' ? 'bg-primary' : 'bg-warning text-dark'}`}>
-                        {item.status}
+                      <span className={`badge px-3 py-2 ${item.status === 'Normal' ? 'bg-success' : 'bg-warning text-dark'}`}>
+                        {item.status === 'Normal' ? 'ปกติ' : 'ต้องตรวจสอบ'}
                       </span>
                     </td>
                   </tr>

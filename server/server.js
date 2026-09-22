@@ -4,12 +4,19 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { setupMQTT, liveDataCache ,machineTrackers} = require('./mqttHandler');
+const userRoutes = require('./userRoutes'); // (สมมติว่าเซฟชื่อไฟล์ว่า userRoutes.js)
+
+
 const pool = require('./db');
 const app = express();
+
+
+app.set('pool', pool);
 
 app.use(cors());
 app.use(express.json());
 
+app.use('/api', userRoutes);
 // เก็บ Cache แยกตาม Mh_ID
 let machineCache = {};
 
@@ -237,45 +244,71 @@ app.get('/api/production/filter', async (req, res) => {
         let query = ``;
         let params = [];
 
-        if (daily) {
+       if (daily) {
             try {
-            query = `
-                SELECT 
-                    DATE_FORMAT(Log_Timestamp, '%H:00') AS hour, 
-                    SUM(OK) AS ok
-                FROM production_sum
-                WHERE 1=1
-            `;
-            if (empId) { query += ` AND Emp_ID = ?`; params.push(empId); }
-            if (mhId) { query += ` AND Mh_ID = ?`; params.push(mhId); }
-            query += `
-                AND CAST(Log_Timestamp AS DATE) = ?
-                GROUP BY DATE_FORMAT(Log_Timestamp, '%H:00')
-                ORDER BY hour;
-            `;
-            params.push(daily);
+                query = `
+                    SELECT 
+                        DATE_FORMAT(p1.Log_Timestamp, '%H:00') AS hour,
+                        SUM(
+                            GREATEST(0, p1.OK - COALESCE(
+                                (SELECT p2.OK 
+                                 FROM production_sum p2 
+                                 WHERE p2.Mh_ID = p1.Mh_ID 
+                                   AND p2.Job_ID = p1.Job_ID 
+                                   AND p2.Log_Timestamp < p1.Log_Timestamp 
+                                 ORDER BY p2.Log_Timestamp DESC 
+                                 LIMIT 1
+                                ), 0)
+                            )
+                        ) AS ok
+                    FROM production_sum p1
+                    WHERE 1=1
+                `;
+                
+                if (empId) { query += ` AND p1.Emp_ID = ?`; params.push(empId); }
+                if (mhId) { query += ` AND p1.Mh_ID = ?`; params.push(mhId); }
+                
+                query += `
+                        AND DATE_FORMAT(p1.Log_Timestamp, '%Y-%m-%d') = ?
+                    GROUP BY DATE_FORMAT(p1.Log_Timestamp, '%H:00')
+                    ORDER BY hour;
+                `;
+                params.push(daily);
             } catch (err) {
                 console.error('Error constructing daily query:', err);
                 return res.status(500).send('Server Error');
             }
-        } 
+        }
         else if (monthly) {
             try {
-            query = `
-                SELECT 
-                    DATE_FORMAT(Log_Timestamp, '%Y-%m-%d') AS log_date,
-                    SUM(OK) AS ok
-                FROM production_sum
-                WHERE 1=1
-            `;
-            if (empId) { query += ` AND Emp_ID = ?`; params.push(empId); }
-            if (mhId) { query += ` AND Mh_ID = ?`; params.push(mhId); }
-            query += `
-                AND DATE_FORMAT(Log_Timestamp, '%Y-%m') = ?
-                GROUP BY log_date
-                ORDER BY log_date;
-            `;
-            params.push(monthly);
+                query = `
+                    SELECT 
+                        DATE_FORMAT(p1.Log_Timestamp, '%Y-%m-%d') AS log_date,
+                        SUM(
+                            GREATEST(0, p1.OK - COALESCE(
+                                (SELECT p2.OK 
+                                 FROM production_sum p2 
+                                 WHERE p2.Mh_ID = p1.Mh_ID 
+                                   AND p2.Job_ID = p1.Job_ID 
+                                   AND p2.Log_Timestamp < p1.Log_Timestamp 
+                                 ORDER BY p2.Log_Timestamp DESC 
+                                 LIMIT 1
+                                ), 0)
+                            )
+                        ) AS ok
+                    FROM production_sum p1
+                    WHERE 1=1
+                `;
+                
+                if (empId) { query += ` AND p1.Emp_ID = ?`; params.push(empId); }
+                if (mhId) { query += ` AND p1.Mh_ID = ?`; params.push(mhId); }
+                
+                query += `
+                        AND DATE_FORMAT(p1.Log_Timestamp, '%Y-%m') = ?
+                    GROUP BY DATE_FORMAT(p1.Log_Timestamp, '%Y-%m-%d')
+                    ORDER BY log_date;
+                `;
+                params.push(monthly);
             } catch (err) {
                 console.error('Error constructing monthly query:', err);
                 return res.status(500).send('Server Error');
@@ -283,61 +316,75 @@ app.get('/api/production/filter', async (req, res) => {
         }
         else if (yearly) {
             try {
-            query = `
-                SELECT
-                    DATE_FORMAT(Log_Timestamp, '%Y-%m') AS log_month,
-                    SUM(OK) AS ok
-                FROM production_sum
-                WHERE 1=1
-            `;
-            if (empId) { query += ` AND Emp_ID = ?`; params.push(empId); }
-            if (mhId) { query += ` AND Mh_ID = ?`; params.push(mhId); }
-            query += `
-                AND DATE_FORMAT(Log_Timestamp, '%Y') = ?
-                GROUP BY log_month
-                ORDER BY log_month;
-            `;
-            params.push(yearly); // สมมติส่งค่าปีมา เช่น '2026'
+                query = `
+                    SELECT
+                        DATE_FORMAT(p1.Log_Timestamp, '%Y-%m') AS log_month,
+                        SUM(
+                            GREATEST(0, p1.OK - COALESCE(
+                                (SELECT p2.OK 
+                                 FROM production_sum p2 
+                                 WHERE p2.Mh_ID = p1.Mh_ID 
+                                   AND p2.Job_ID = p1.Job_ID 
+                                   AND p2.Log_Timestamp < p1.Log_Timestamp 
+                                 ORDER BY p2.Log_Timestamp DESC 
+                                 LIMIT 1
+                                ), 0)
+                            )
+                        ) AS ok
+                    FROM production_sum p1
+                    WHERE 1=1
+                `;
+                
+                if (empId) { query += ` AND p1.Emp_ID = ?`; params.push(empId); }
+                if (mhId) { query += ` AND p1.Mh_ID = ?`; params.push(mhId); }
+                
+                query += `
+                        AND DATE_FORMAT(p1.Log_Timestamp, '%Y') = ?
+                    GROUP BY DATE_FORMAT(p1.Log_Timestamp, '%Y-%m')
+                    ORDER BY log_month;
+                `;
+                params.push(yearly);
             } catch (err) {
                 console.error('Error constructing yearly query:', err);
                 return res.status(500).send('Server Error');
             }
         }
-        else if (All_year  === 'true') {
-
-            // 1. กำหนดคอลัมน์พื้นฐานที่จะใช้กรุ๊ปตามปี
-            let selectColumns = ["DATE_FORMAT(Log_Timestamp, '%Y') AS log_year", "SUM(OK) AS ok"];
-            let groupByColumns = ["DATE_FORMAT(Log_Timestamp, '%Y')"];
+        else if (All_year === 'true') {
+            // กำหนดคอลัมน์พื้นฐานที่จะใช้กรุ๊ปตามปี (ใช้ Subquery หา Delta เช่นเดียวกัน)
+            let selectColumns = [
+                "DATE_FORMAT(p1.Log_Timestamp, '%Y') AS log_year", 
+                `SUM(GREATEST(0, p1.OK - COALESCE((SELECT p2.OK FROM production_sum p2 WHERE p2.Mh_ID = p1.Mh_ID AND p2.Job_ID = p1.Job_ID AND p2.Log_Timestamp < p1.Log_Timestamp ORDER BY p2.Log_Timestamp DESC LIMIT 1), 0))) AS ok`
+            ];
+            let groupByColumns = ["DATE_FORMAT(p1.Log_Timestamp, '%Y')"];
+            
             try {
-                query = `
-                    SELECT 
-                `;
+                query = `SELECT `;
 
-                // 2. ถ้ามีการส่ง mhId มา ให้เพิ่มเข้าไปใน SELECT และ GROUP BY
+                // ถ้ามีการส่ง mhId มา ให้เพิ่มเข้าไปใน SELECT และ GROUP BY
                 if (mhId) {
-                    selectColumns.unshift('Mh_ID');
-                    groupByColumns.unshift('Mh_ID');
+                    selectColumns.unshift('p1.Mh_ID');
+                    groupByColumns.unshift('p1.Mh_ID');
                 }
 
-                // 3. ถ้ามีการส่ง empId มา ให้เพิ่มเข้าไปใน SELECT และ GROUP BY
+                // ถ้ามีการส่ง empId มา ให้เพิ่มเข้าไปใน SELECT และ GROUP BY
                 if (empId) {
-                    selectColumns.unshift('Emp_ID');
-                    groupByColumns.unshift('Emp_ID');
+                    selectColumns.unshift('p1.Emp_ID');
+                    groupByColumns.unshift('p1.Emp_ID');
                 }
 
-                query += selectColumns.join(', ') + ` FROM production_sum WHERE 1=1`;
+                query += selectColumns.join(', ') + ` FROM production_sum p1 WHERE 1=1`;
 
-                // 4. ใส่เงื่อนไข WHERE
+                // ใส่เงื่อนไข WHERE
                 if (empId) { 
-                    query += ` AND Emp_ID = ?`; 
+                    query += ` AND p1.Emp_ID = ?`; 
                     params.push(empId); 
                 }
                 if (mhId) { 
-                    query += ` AND Mh_ID = ?`; 
+                    query += ` AND p1.Mh_ID = ?`; 
                     params.push(mhId); 
                 }
 
-                // 5. ปิดท้ายด้วย GROUP BY ตามคอลัมน์ที่มี
+                // ปิดท้ายด้วย GROUP BY ตามคอลัมน์ที่มี
                 query += `
                     GROUP BY ${groupByColumns.join(', ')}
                     ORDER BY log_year;
@@ -550,6 +597,8 @@ app.get('/api/production/downtime', async (req, res) => {
 // http://localhost:5000/api/production/downtime?datetime=2026  showe ข้อมูลการหยุดทำงานของเครื่องจักรทั้งหมดของปี 2026
 
 const PORT = process.env.PORT;
+//app.listen(PORT, async () => {
+//    console.log(`Node.js Server running on http://localhost:${PORT}`);
 app.listen(PORT, async () => {
     console.log(`Node.js Server running on http://localhost:${PORT}`);
     setupMQTT();

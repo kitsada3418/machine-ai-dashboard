@@ -15,6 +15,15 @@ function Navbar({ currentPage, setCurrentPage, userRole, onLogout }) {
     year: 'numeric', month: 'short', day: 'numeric' 
   });
 
+  // ดึงสิทธิ์ที่ผู้ใช้ได้รับจาก localStorage
+  const userPermissions = JSON.parse(localStorage.getItem('permissions') || '[]');
+
+  // ฟังก์ชันตรวจสอบสิทธิ์ (Admin เห็นทั้งหมด ถ้าไม่ใช่ให้เช็คจากอาเรย์ permissions)
+  const canShowMenu = (pageId) => {
+    if (userRole === 'admin') return true;
+    return userPermissions.includes(pageId);
+  };
+
   return (
     <>
       <style>
@@ -69,7 +78,7 @@ function Navbar({ currentPage, setCurrentPage, userRole, onLogout }) {
         className="d-flex flex-column shadow-sm" 
         style={{ 
           backgroundColor: '#f4f7fb', 
-          width: '200px',       // 📌 ลดความกว้าง Sidebar เหลือ 220px
+          width: '200px',      // 📌 ความกว้าง Sidebar 200px ตามที่คุณต้องการ
           height: '100vh',
           position: 'fixed',
           left: '0px',                     
@@ -106,44 +115,98 @@ function Navbar({ currentPage, setCurrentPage, userRole, onLogout }) {
 
         <hr className="my-0 mx-3" style={{ borderColor: '#cbd5e1', opacity: 0.6 }} />
 
-        {/* ================= ส่วนกลาง: เมนูนำทาง ================= */}
+        {/* ================= ส่วนกลาง: เมนูนำทาง (เช็คสิทธิ์แต่ละปุ่ม) ================= */}
         <div className="sidebar-menu-container px-2 py-3 d-flex flex-column">
+          
+          {/* Dashboard (หน้าหลัก ทุกคนควรเห็น) */}
           <button className={`sidebar-btn ${currentPage === 'dashboard' ? 'active' : ''}`} onClick={() => setCurrentPage('dashboard')}>
             <span className="nav-icon">📊</span><span className="nav-label">Dashboard</span>
           </button>
-          <button className={`sidebar-btn ${currentPage === 'graphs' ? 'active' : ''}`} onClick={() => setCurrentPage('graphs')}>
-            <span className="nav-icon">📈</span><span className="nav-label">Graphs</span>
-          </button>
-          <button className={`sidebar-btn ${currentPage === 'logs' ? 'active' : ''}`} onClick={() => setCurrentPage('logs')}>
-            <span className="nav-icon">📜</span><span className="nav-label">Data Logs</span>
-          </button>
-          <button className={`sidebar-btn ${currentPage === 'alarms' ? 'active' : ''}`} onClick={() => setCurrentPage('alarms')}>
-            <span className="nav-icon">🚨</span><span className="nav-label">Alarm Log</span>
-          </button>
-          <button className={`sidebar-btn ${currentPage === 'manager' ? 'active' : ''}`} onClick={() => setCurrentPage('manager')}>
-            <span className="nav-icon">📁</span><span className="nav-label">File Manager</span>
-          </button>
-          <button className={`sidebar-btn ${currentPage === 'layout' ? 'active' : ''}`} onClick={() => setCurrentPage('layout')}>
-            <span className="nav-icon">🗺️</span><span className="nav-label">Layout</span>
-          </button>
-          <button className={`sidebar-btn ${currentPage === 'free_layout' ? 'active' : ''}`} onClick={() => setCurrentPage('free_layout')}>
-            <span className="nav-icon">📐</span><span className="nav-label">Free Layout</span>
-          </button>
-          <button className={`sidebar-btn ${currentPage === 'oee_dashboard' ? 'active' : ''}`} onClick={() => setCurrentPage('oee_dashboard')}>
-            <span className="nav-icon">⚙️</span><span className="nav-label">OEE Dashboard</span>
-          </button>
-          <button className={`sidebar-btn ${currentPage === 'report' ? 'active' : ''}`} onClick={() => setCurrentPage('report')}>
-            <span className="nav-icon">📑</span><span className="nav-label">Report</span>
-          </button>
-          <button className={`sidebar-btn ${currentPage === 'user_management' ? 'active' : ''}`} onClick={() => setCurrentPage('user_management')}>
-            <span className="nav-icon">👥</span><span className="nav-label">User Management</span>
-          </button>
-          <button className={`sidebar-btn ${currentPage === 'maintenance' ? 'active' : ''}`} onClick={() => setCurrentPage('maintenance')}>
-            <span className="nav-icon">🔧</span><span className="nav-label">Maintenance</span>
-          </button>
-          <button className={`sidebar-btn ${currentPage === 'supervisor' ? 'active' : ''}`} onClick={() => setCurrentPage('supervisor')}>
-            <span className="nav-icon">👔</span><span className="nav-label">Supervisor</span>
-          </button>
+
+          {/* Graphs */}
+          {canShowMenu('graphs') && (
+            <button className={`sidebar-btn ${currentPage === 'graphs' ? 'active' : ''}`} onClick={() => setCurrentPage('graphs')}>
+              <span className="nav-icon">📈</span><span className="nav-label">Graphs</span>
+            </button>
+          )}
+
+          {/* Data Logs */}
+          {canShowMenu('logs') && (
+            <button className={`sidebar-btn ${currentPage === 'logs' || currentPage === 'log_detail' ? 'active' : ''}`} onClick={() => setCurrentPage('logs')}>
+              <span className="nav-icon">📜</span><span className="nav-label">Data Logs</span>
+            </button>
+          )}
+
+          {/* Alarm Log */}
+          {canShowMenu('alarms') && (
+            <button className={`sidebar-btn ${currentPage === 'alarms' ? 'active' : ''}`} onClick={() => setCurrentPage('alarms')}>
+              <span className="nav-icon">🚨</span><span className="nav-label">Alarm Log</span>
+            </button>
+          )}
+
+          {/* File Manager */}
+          {canShowMenu('manager') && (
+            <button className={`sidebar-btn ${currentPage === 'manager' ? 'active' : ''}`} onClick={() => setCurrentPage('manager')}>
+              <span className="nav-icon">📁</span><span className="nav-label">File Manager</span>
+            </button>
+          )}
+
+          {/* Layout */}
+          {canShowMenu('layout') && (
+            <button className={`sidebar-btn ${currentPage === 'layout' ? 'active' : ''}`} onClick={() => setCurrentPage('layout')}>
+              <span className="nav-icon">🗺️</span><span className="nav-label">Layout</span>
+            </button>
+          )}
+
+          {/* Free Layout */}
+          {canShowMenu('free_layout') && (
+            <button className={`sidebar-btn ${currentPage === 'free_layout' ? 'active' : ''}`} onClick={() => setCurrentPage('free_layout')}>
+              <span className="nav-icon">📐</span><span className="nav-label">Free Layout</span>
+            </button>
+          )}
+
+          {/* OEE Dashboard */}
+          {canShowMenu('oee_dashboard') && (
+            <button className={`sidebar-btn ${currentPage === 'oee_dashboard' ? 'active' : ''}`} onClick={() => setCurrentPage('oee_dashboard')}>
+              <span className="nav-icon">⚙️</span><span className="nav-label">OEE Dashboard</span>
+            </button>
+          )}
+
+          {/* Report */}
+          {canShowMenu('report') && (
+            <button className={`sidebar-btn ${currentPage === 'report' ? 'active' : ''}`} onClick={() => setCurrentPage('report')}>
+              <span className="nav-icon">📑</span><span className="nav-label">Report</span>
+            </button>
+          )}
+
+          {/* Maintenance */}
+          {canShowMenu('maintenance') && (
+            <button className={`sidebar-btn ${currentPage === 'maintenance' ? 'active' : ''}`} onClick={() => setCurrentPage('maintenance')}>
+              <span className="nav-icon">🔧</span><span className="nav-label">Maintenance</span>
+            </button>
+          )}
+
+          {/* Supervisor */}
+          {canShowMenu('supervisor') && (
+            <button className={`sidebar-btn ${currentPage === 'supervisor' ? 'active' : ''}`} onClick={() => setCurrentPage('supervisor')}>
+              <span className="nav-icon">👔</span><span className="nav-label">Supervisor</span>
+            </button>
+          )}
+
+          {/* User Management */}
+          {canShowMenu('user_management') && (
+            <button className={`sidebar-btn ${currentPage === 'user_management' ? 'active' : ''}`} onClick={() => setCurrentPage('user_management')}>
+              <span className="nav-icon">👥</span><span className="nav-label">User Management</span>
+            </button>
+          )}
+
+          {/* System Logs */}
+          {canShowMenu('system_logs') && (
+            <button className={`sidebar-btn ${currentPage === 'system_logs' ? 'active' : ''}`} onClick={() => setCurrentPage('system_logs')}>
+              <span className="nav-icon">📝</span><span className="nav-label">System Logs</span>
+            </button>
+          )}
+
         </div>
 
         {/* ================= ส่วนล่าง: User & Logout ================= */}

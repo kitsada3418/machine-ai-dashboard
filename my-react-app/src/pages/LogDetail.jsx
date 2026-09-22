@@ -1,5 +1,12 @@
 import React, { useState, useEffect } from 'react';
 
+const getCurrentMonth = () => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0'); // เติม 0 ข้างหน้าถ้าเป็นเลขตัวเดียว
+    return `${year}-${month}`;
+};
+
 function LogDetail({ setCurrentPage, machineId }) {
   // 1. แยกประเภทว่าเป็นพนักงานหรือเครื่องจักร จากข้อความที่ส่งมา
   const isEmployee = machineId?.startsWith('พนักงาน:');
@@ -10,7 +17,7 @@ function LogDetail({ setCurrentPage, machineId }) {
   const [loading, setLoading] = useState(false);
   
   // State สำหรับ Filters (ซ่อนช่อง Machine/Employee เพราะเราเจาะจงมาแล้ว)
-  const [filterDate, setFilterDate] = useState(''); // เริ่มต้นเป็นค่าว่างเพื่อดูประวัติทั้งหมด
+  const [filterDate, setFilterDate] = useState(getCurrentMonth()); // เริ่มต้นเป็นเดือนปัจจุบัน
   const [filterJob, setFilterJob] = useState('');
   
   // State สำหรับ Pagination
@@ -80,7 +87,7 @@ function LogDetail({ setCurrentPage, machineId }) {
           <div className="col-md-4">
             <label className="form-label text-muted fw-bold mb-1" style={{ fontSize: '0.8rem' }}>FILTER BY DATE (ปล่อยว่างเพื่อดูทั้งหมด)</label>
             <input 
-              type="date" 
+              type="month" 
               className="form-control fw-bold border-2" 
               value={filterDate}
               onChange={(e) => setFilterDate(e.target.value)}
@@ -112,7 +119,7 @@ function LogDetail({ setCurrentPage, machineId }) {
             <table className="table table-hover table-striped align-middle mb-0" style={{ fontSize: '0.9rem' }}>
               <thead className="table-dark">
                 <tr className="text-center">
-                  <th>Start Time</th>
+                  <th>DATE</th>
                   <th>{isEmployee ? 'Machine' : 'Employee'}</th>
                   <th>Job ID</th>
                   <th>Customer</th>
@@ -139,7 +146,7 @@ function LogDetail({ setCurrentPage, machineId }) {
                 ) : (
                   currentLogs.map((log, index) => (
                     <tr key={index} className="text-center">
-                      <td className="text-nowrap">{new Date(log.Start_Time).toLocaleString('en-GB')}</td>
+                      <td className="text-nowrap">{new Date(log.Start_Time).toLocaleDateString('en-GB', { timeZone: 'Asia/Bangkok' })}</td>
                       
                       {/* สลับแสดงคอลัมน์ ถ้าค้นหาพนักงานให้โชว์เครื่องที่ทำ, ถ้าค้นหาเครื่องให้โชว์พนักงานที่ทำ */}
                       <td className="fw-bold">{isEmployee ? log.Mh_ID : log.Emp_ID}</td>

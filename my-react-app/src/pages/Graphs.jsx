@@ -1,14 +1,61 @@
 import React, { useState, useEffect } from 'react';
-import { ResponsiveContainer, BarChart, LineChart, Bar, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
+import { ResponsiveContainer, BarChart, LineChart, Bar, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend, LabelList } from 'recharts';
+
+// ================= ฟังก์ชันวาดตัวเลขแบบเอียง (Custom Labels) =================
+const renderBarLabel = (props) => {
+  const { x, y, width, value } = props;
+  if (!value || value <= 0) return null; 
+  return (
+    <text x={x + width / 2} y={y - 5} fill="#444" fontSize="12" fontWeight="bold" textAnchor="start" transform={`rotate(-45, ${x + width / 2}, ${y - 5})`}>
+      {Number(value).toLocaleString()}
+    </text>
+  );
+};
+
+const renderLineLabel = (props) => {
+  const { x, y, value } = props;
+  if (!value || value <= 0) return null;
+  return (
+    <text x={x} y={y - 10} fill="#0d6efd" fontSize="12" fontWeight="bold" textAnchor="start" transform={`rotate(-45, ${x}, ${y - 10})`}>
+      {Number(value).toLocaleString()}
+    </text>
+  );
+};
+
+// ================= Custom Tooltip (แสดงรายละเอียดตอนเอาเมาส์ชี้กราฟ) =================
+const CustomTooltip = ({ active, payload, label, viewMode }) => {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload;
+    return (
+      <div className="bg-white p-3 border border-2 rounded-3 shadow">
+        <p className="fw-bold mb-2 border-bottom pb-2 text-primary">{label}</p>
+        {payload.map((entry, index) => (
+          <div key={index} style={{ color: entry.color }} className="fw-bold fs-6 mb-1">
+            {entry.name}: {entry.value.toLocaleString()}
+          </div>
+        ))}
+        {/* โชว์ยอดรวมและจำนวนเครื่องเฉพาะเมื่อเลือก 'All' และมีข้อมูลมากกว่า 1 เครื่อง */}
+        {data.activeCount > 1 && (
+          <div className="text-muted mt-2 pt-2 border-top small fw-bold">
+            <div className="mb-1">🔹 รวมยอดดิบ (Total Output): {data.totalQty.toLocaleString()} Pcs</div>
+            <div>🔸 เครื่อง/คนที่ขึ้นงาน (Active): {data.activeCount} {viewMode === 'machine' ? 'เครื่อง' : 'คน'}</div>
+          </div>
+        )}
+      </div>
+    );
+  }
+  return null;
+};
+// =========================================================================
 
 function Graphs() {
   // ================= STATE ควบคุมตัวเลือกต่างๆ =================
-  const [viewMode, setViewMode] = useState('machine'); // 'machine' หรือ 'employee'
-  const [selectedTarget, setSelectedTarget] = useState('all'); // 'all' หรือ รหัสที่เลือก
-  const [availableTargets, setAvailableTargets] = useState([]); // เก็บรายชื่อที่มีข้อมูลในวันนั้น
-  const [period, setPeriod] = useState('day'); // 'day', 'month', 'year', 'allyear'
-  const [metricView, setMetricView] = useState('qty'); // 'qty', 'cycle', 'both'
-  const [chartType, setChartType] = useState('bar'); // 'bar' หรือ 'line'
+  const [viewMode, setViewMode] = useState('machine'); 
+  const [selectedTarget, setSelectedTarget] = useState('all'); 
+  const [availableTargets, setAvailableTargets] = useState([]); 
+  const [period, setPeriod] = useState('day'); 
+  const [metricView, setMetricView] = useState('qty'); 
+  const [chartType, setChartType] = useState('bar'); 
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   
   // ================= STATE สำหรับเก็บข้อมูลกราฟ =================
@@ -17,7 +64,7 @@ function Graphs() {
   const [avgTime, setAvgTime] = useState(0);
   const [loading, setLoading] = useState(false);
 
-  // ================= ฟังก์ชัน 1: ดึงรายชื่อ Dropdown ที่มีข้อมูล =================
+  // ================= ฟังก์ชัน 1: ดึงรายชื่อ Dropdown =================
   const fetchDropdownTargets = async () => {
     try {
       let queryParam = '';
@@ -32,7 +79,6 @@ function Graphs() {
       
       setAvailableTargets(result);
 
-      // ถ้ารายการที่เคยเลือกไว้ ไม่มีในข้อมูลชุดใหม่ ให้รีเซ็ตกลับเป็น 'all' อัตโนมัติ
       if (selectedTarget !== 'all' && !result.includes(selectedTarget)) {
         setSelectedTarget('all');
       }
@@ -47,7 +93,6 @@ function Graphs() {
     setLoading(true);
     try {
       let queryParam = '';
-      
       if (period === 'day') queryParam = `daily=${selectedDate}`;
       else if (period === 'month') queryParam = `monthly=${selectedDate.slice(0, 7)}`;
       else if (period === 'year') queryParam = `yearly=${selectedDate.slice(0, 4)}`;
@@ -55,40 +100,37 @@ function Graphs() {
 
       let filterTargetParam = '';
       if (selectedTarget && selectedTarget !== 'all') {
-        if (viewMode === 'machine') {
-          filterTargetParam = `&mhId=${selectedTarget}`;
-        } else {
-          filterTargetParam = `&empId=${selectedTarget}`;
-        }
+        if (viewMode === 'machine') filterTargetParam = `&mhId=${selectedTarget}`;
+        else filterTargetParam = `&empId=${selectedTarget}`;
       }
 
       const response = await fetch(`http://localhost:5000/api/production/filter?${queryParam}${filterTargetParam}`);
       if (!response.ok) throw new Error('Failed to fetch data');
       const result = await response.json();
       
-     // const formattedData = result.map(item => ({
-     //   name: item.hour || item.log_date || item.log_month || item.log_year,
-    //   qty: Number(item.ok) || 0,
-     //   cycle: Number(item.cycle) || 0
-    // }));
+      const activeCount = availableTargets.length || 1; // หาจำนวนเครื่อง/คน เพื่อนำไปหารเฉลี่ย
+
       const formattedData = result.map(item => {
           let displayName = item.hour || item.log_month || item.log_year;
-          
-          // ถ้ามี log_date (โหมดเดือน) ให้ตัดเอาเฉพาะ "วันที่" ตัวหลังสุดมาแสดง
-          if (item.log_date) {
-            displayName = item.log_date.slice(5);
-          }
+          if (item.log_date) displayName = item.log_date.slice(5);
+
+          const rawQty = Number(item.ok) || 0;
+          // ถ้าเลือก All ให้เอายอด rawQty ไปหารจำนวนเครื่อง/คน
+          const displayQty = selectedTarget === 'all' ? Math.round(rawQty / activeCount) : rawQty;
 
           return {
             name: displayName,
-            qty: Number(item.ok) || 0,
-            cycle: Number(item.cycle) || 0
+            totalQty: rawQty, // เก็บยอดเต็มไว้โชว์ใน Tooltip
+            qty: displayQty,  // ค่ายอดเฉลี่ยที่จะวาดบนกราฟ
+            cycle: Number(item.cycle) || 0,
+            activeCount: selectedTarget === 'all' ? activeCount : 1
           };
         });
 
       setChartData(formattedData);
       
-      const total = formattedData.reduce((sum, item) => sum + item.qty, 0);
+      // การสรุปยอด Total ด้านล่างต้องดึงจากยอดเต็ม (totalQty) เสมอ
+      const total = formattedData.reduce((sum, item) => sum + item.totalQty, 0);
       setTotalOutput(total);
 
       const avg = formattedData.length > 0 
@@ -106,19 +148,19 @@ function Graphs() {
     }
   };
 
-  // ดึง Dropdown ทุกครั้งที่เปลี่ยนโหมดหรือช่วงเวลา
   useEffect(() => {
     fetchDropdownTargets();
   }, [viewMode, period, selectedDate]);
 
-  // ดึงข้อมูลกราฟทุกครั้งที่เงื่อนไขใดๆ รวมถึง Dropdown เปลี่ยนแปลง
+  // **สำคัญ**: เพิ่ม availableTargets เป็น dependency เพื่อให้กราฟอัปเดตตัวหารให้ถูกต้องเมื่อ dropdown เปลี่ยนแปลง
   useEffect(() => {
     fetchGraphData();
-  }, [viewMode, period, selectedDate, selectedTarget]);
+  }, [viewMode, period, selectedDate, selectedTarget, availableTargets]);
+
+  const qtyLegendName = selectedTarget === 'all' ? `Avg Quantity per ${viewMode === 'machine' ? 'Machine' : 'Employee'} (Pcs)` : 'Quantity (Pcs)';
 
   return (
     <div className="animate__animated animate__fadeIn container-fluid p-4">
-      
       {/* ================= CONTROL BAR ================= */}
       <div className="card p-3 mb-4 border-2 rounded-4 shadow-sm bg-white">
         <div className="row g-3 align-items-end">
@@ -139,11 +181,7 @@ function Graphs() {
 
           <div className="col-md-auto">
             <label className="form-label text-muted fw-bold mb-1" style={{ fontSize: '0.8rem' }}>FILTER TARGET</label>
-            <select 
-              className="form-select border-2 fw-bold" 
-              value={selectedTarget} 
-              onChange={(e) => setSelectedTarget(e.target.value)}
-            >
+            <select className="form-select border-2 fw-bold" value={selectedTarget} onChange={(e) => setSelectedTarget(e.target.value)}>
               <option value="all">All (Overview)</option>
               {availableTargets.map((target, index) => (
                 <option key={index} value={target}>
@@ -220,34 +258,44 @@ function Graphs() {
                 <div style={{ height: '380px', width: '100%' }}>
                   <ResponsiveContainer>
                     {chartType === 'bar' ? (
-                      <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                      <BarChart data={chartData} margin={{ top: 50, right: 30, left: 20, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                        <XAxis dataKey="name" 
-                                angle={-45} 
-                                textAnchor="end" 
-                                height={60}  
-                                tick={{ fill: '#6c757d' }} 
-                                interval={0}/>
-                        <YAxis tick={{ fill: '#6c757d' }} />
-                        <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }} />
+                        <XAxis dataKey="name" angle={-45} textAnchor="end" height={60} tick={{ fill: '#6c757d' }} interval={0}/>
+                        <YAxis tick={{ fill: '#6c757d' }} domain={[0, dataMax => Math.ceil(dataMax * 1.25)]} />
+                        
+                        <Tooltip content={<CustomTooltip viewMode={viewMode} />} cursor={{fill: 'rgba(0,0,0,0.05)'}} />
                         <Legend wrapperStyle={{ paddingTop: '20px' }} />
-                        {(metricView === 'qty' || metricView === 'both') && <Bar dataKey="qty" name="Quantity (Pcs)" fill="#0d6efd" radius={[4, 4, 0, 0]} />}
-                        {(metricView === 'cycle' || metricView === 'both') && <Bar dataKey="cycle" name="Cycle Time (s)" fill="#ffc107" radius={[4, 4, 0, 0]} />}
+                        
+                        {(metricView === 'qty' || metricView === 'both') && (
+                          <Bar dataKey="qty" name={qtyLegendName} fill="#0d6efd" radius={[4, 4, 0, 0]}>
+                            <LabelList dataKey="qty" content={renderBarLabel} />
+                          </Bar>
+                        )}
+                        {(metricView === 'cycle' || metricView === 'both') && (
+                          <Bar dataKey="cycle" name="Cycle Time (s)" fill="#ffc107" radius={[4, 4, 0, 0]}>
+                            <LabelList dataKey="cycle" content={renderBarLabel} />
+                          </Bar>
+                        )}
                       </BarChart>
                     ) : (
-                      <LineChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                      <LineChart data={chartData} margin={{ top: 50, right: 30, left: 20, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                        <XAxis dataKey="name" angle={-45} 
-                                textAnchor="end" 
-                                height={60}  
-                                tick={{ fill: '#6c757d' }} 
-                                interval={0} />
-                                
-                        <YAxis tick={{ fill: '#6c757d' }} />
-                        <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }} />
+                        <XAxis dataKey="name" angle={-45} textAnchor="end" height={60} tick={{ fill: '#6c757d' }} interval={0} />
+                        <YAxis tick={{ fill: '#6c757d' }} domain={[0, dataMax => Math.ceil(dataMax * 1.25)]} />
+                        
+                        <Tooltip content={<CustomTooltip viewMode={viewMode} />} />
                         <Legend wrapperStyle={{ paddingTop: '20px' }} />
-                        {(metricView === 'qty' || metricView === 'both') && <Line type="monotone" dataKey="qty" name="Quantity (Pcs)" stroke="#0d6efd" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />}
-                        {(metricView === 'cycle' || metricView === 'both') && <Line type="monotone" dataKey="cycle" name="Cycle Time (s)" stroke="#ffc107" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />}
+                        
+                        {(metricView === 'qty' || metricView === 'both') && (
+                          <Line type="monotone" dataKey="qty" name={qtyLegendName} stroke="#0d6efd" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }}>
+                            <LabelList dataKey="qty" content={renderLineLabel} />
+                          </Line>
+                        )}
+                        {(metricView === 'cycle' || metricView === 'both') && (
+                          <Line type="monotone" dataKey="cycle" name="Cycle Time (s)" stroke="#ffc107" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }}>
+                            <LabelList dataKey="cycle" content={renderLineLabel} />
+                          </Line>
+                        )}
                       </LineChart>
                     )}
                   </ResponsiveContainer>
@@ -255,18 +303,39 @@ function Graphs() {
               )}
             </div>
 
+            {/* ================= BOTTOM SUMMARY CARDS ================= */}
             <div className="bg-light p-4 border-top rounded-bottom-4">
-              <div className="row">
-                <div className="col-md-6 text-center">
-                  <span className="fw-bold text-secondary">Total Output:</span>
-                  <span className="text-primary fw-bold ms-2" style={{ fontSize: '2rem' }}>{totalOutput.toLocaleString()}</span> 
-                  <span className="fs-5 text-muted ms-1">Pcs</span>
+              <div className="row align-items-center">
+                
+                <div className={`col-md-${selectedTarget === 'all' ? '3' : '6'} text-center`}>
+                  <span className="fw-bold text-secondary">Total Output:</span><br/>
+                  <span className="text-primary fw-bold" style={{ fontSize: '1.8rem' }}>{totalOutput.toLocaleString()}</span> 
+                  <span className="fs-6 text-muted ms-1">Pcs</span>
                 </div>
-                <div className="col-md-6 text-center border-start">
-                  <span className="fw-bold text-secondary">Average Time:</span>
-                  <span className="text-danger fw-bold ms-2" style={{ fontSize: '2rem' }}>{Number(avgTime).toFixed(2)}</span> 
-                  <span className="fs-5 text-muted ms-1">Sec</span>
+
+                {/* แสดงกล่องตัวหารและค่าเฉลี่ยเฉพาะเมื่อเลือก 'All' */}
+                {selectedTarget === 'all' && (
+                  <>
+                    <div className="col-md-3 text-center border-start">
+                      <span className="fw-bold text-secondary">Active {viewMode === 'machine' ? 'Machines' : 'Employees'}:</span><br/>
+                      <span className="text-success fw-bold" style={{ fontSize: '1.8rem' }}>{availableTargets.length}</span>
+                    </div>
+                    <div className="col-md-3 text-center border-start">
+                      <span className="fw-bold text-secondary">Avg / {viewMode === 'machine' ? 'Machine' : 'Emp'}:</span><br/>
+                      <span className="text-info fw-bold" style={{ fontSize: '1.8rem' }}>
+                        {availableTargets.length > 0 ? Math.round(totalOutput / availableTargets.length).toLocaleString() : 0}
+                      </span>
+                      <span className="fs-6 text-muted ms-1">Pcs</span>
+                    </div>
+                  </>
+                )}
+
+                <div className={`col-md-${selectedTarget === 'all' ? '3' : '6'} text-center border-start`}>
+                  <span className="fw-bold text-secondary">Avg Cycle Time:</span><br/>
+                  <span className="text-danger fw-bold" style={{ fontSize: '1.8rem' }}>{Number(avgTime).toFixed(2)}</span> 
+                  <span className="fs-6 text-muted ms-1">Sec</span>
                 </div>
+
               </div>
             </div>
 

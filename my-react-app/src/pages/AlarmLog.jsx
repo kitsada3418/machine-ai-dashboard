@@ -292,11 +292,13 @@ function AlarmLog() {
                       currentLogs.map((log, index) => (
                         <tr key={index} className="text-center">
                           {!isSummary && (
-                            <td className="text-nowrap text-muted small">{new Date(log.Start_Time).toLocaleString('en-GB')}</td>
+                            <td className="text-nowrap text-muted ">
+                                {new Date(log.Start_Time).toLocaleTimeString('en-GB')}
+                            </td>
                           )}
                           {!isSummary && (
-                            <td className="text-nowrap text-muted small">
-                              {log.End_Time ? new Date(log.End_Time).toLocaleString('en-GB') : <span className="badge bg-warning text-dark">Ongoing</span>}
+                            <td className="text-nowrap text-muted">
+                                {log.End_Time ? new Date(log.End_Time).toLocaleTimeString('en-GB') : <span className="badge bg-warning text-dark" >Ongoing</span>}
                             </td>
                           )}
                           <td className="fw-bold text-primary">{log.Mh_ID || '-'}</td>
