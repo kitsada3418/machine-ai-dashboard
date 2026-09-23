@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 
 function Navbar({ currentPage, setCurrentPage, userRole, onLogout }) {
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -16,7 +16,14 @@ function Navbar({ currentPage, setCurrentPage, userRole, onLogout }) {
   });
 
   // ดึงสิทธิ์ที่ผู้ใช้ได้รับจาก localStorage
-  const userPermissions = JSON.parse(localStorage.getItem('permissions') || '[]');
+  const userPermissions = (() => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem('permissions') || '[]');
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  })();
 
   // ฟังก์ชันตรวจสอบสิทธิ์ (Admin เห็นทั้งหมด ถ้าไม่ใช่ให้เช็คจากอาเรย์ permissions)
   const canShowMenu = (pageId) => {

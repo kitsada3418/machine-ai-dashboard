@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 
 function Layout({ setCurrentPage, setSelectedMachine }) {
   // จำลองข้อมูลผังห้องและเครื่องจักร (ในอนาคตสามารถดึงค่าที่บันทึกมาจากหน้า Free Layout ได้ตรงนี้ครับ)

@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import { apiFetch } from '../api';
 
 function Report() {
   // ================= STATE =================
@@ -18,24 +19,25 @@ function Report() {
   });
   const [loading, setLoading] = useState(false);
 
-  // ================= FETCH DROPDOWN OPTIONS =================
-  const fetchDropdownOptions = async () => {
-    try {
-      const empRes = await fetch('http://localhost:5000/api/production/selectData?empId_All=true');
-      const empData = await empRes.json();
-      setEmployeeOptions(empData.map(item => item.Emp_ID || item.emp_id || Object.values(item)[0]));
-    } catch (error) {
-      console.error('Error fetching dropdown options:', error);
-    }
-  };
-
   useEffect(() => {
-    fetchDropdownOptions();
-    generateReport();
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const empRes = await apiFetch('/api/production/selectData?empId_All=true');
+        const empRaw = await empRes.json();
+        if (cancelled) return;
+        const empData = Array.isArray(empRaw) ? empRaw : [];
+        setEmployeeOptions(empData.map(item => item.Emp_ID || item.emp_id || Object.values(item)[0]));
+      } catch (error) {
+        console.error('Error fetching dropdown options:', error);
+      }
+    };
+    run();
+    return () => { cancelled = true; };
   }, []);
 
   // ================= FETCH DATA & PROCESS =================
-  const generateReport = async () => {
+  async function generateReport() {
     setLoading(true);
     try {
       // 1. จัดฟอร์แมตวันที่ตาม Report Type
@@ -50,9 +52,10 @@ function Report() {
       }
 
       // 2. ดึงข้อมูลจาก API (สมมติว่า API ดึงข้อมูล log + downtime มาให้แล้ว)
-      const response = await fetch(`http://localhost:5000/api/datalog?${queryParams.toString()}`);
+      const response = await apiFetch(`/api/datalog?${queryParams.toString()}`);
       if (!response.ok) throw new Error('Failed to fetch report data');
-      const data = await response.json();
+      const dataRaw = await response.json();
+      const data = Array.isArray(dataRaw) ? dataRaw : [];
 
       const groupedData = {};
       const allUniqueJobs = new Set();
@@ -134,7 +137,18 @@ function Report() {
     } finally {
       setLoading(false);
     }
-  };
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      await generateReport();
+      if (cancelled) return;
+    };
+    run();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleExport = (format) => {
     alert(`กำลังเตรียมดาวน์โหลดรายงานพนักงานรูปแบบ .${format.toUpperCase()} ...`);

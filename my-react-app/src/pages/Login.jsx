@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
+import { API_BASE, safeParse } from '../api';
 
 function Login({ setIsLoggedIn, setUserRole }) {
   const [username, setUsername] = useState('');
@@ -19,7 +20,7 @@ function Login({ setIsLoggedIn, setUserRole }) {
 
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:5000/api/login', {
+      const response = await fetch(`${API_BASE}/api/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
@@ -32,9 +33,9 @@ function Login({ setIsLoggedIn, setUserRole }) {
         localStorage.setItem('role', data.role);
         
         // 🔑 บันทึกสิทธิ์ (permissions) ที่ได้จาก Backend ลงใน localStorage
-        const permissionsToSave = typeof data.permissions === 'string' 
-          ? JSON.parse(data.permissions) 
-          : (data.permissions || []);
+        const permissionsToSave = typeof data.permissions === 'string'
+          ? safeParse(data.permissions, [])
+          : (Array.isArray(data.permissions) ? data.permissions : []);
           
         localStorage.setItem('permissions', JSON.stringify(permissionsToSave));
         
@@ -49,11 +50,6 @@ function Login({ setIsLoggedIn, setUserRole }) {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleQuickLogin = (role) => {
-    setIsLoggedIn(true);
-    setUserRole(role);
   };
 
   return (
@@ -108,13 +104,6 @@ function Login({ setIsLoggedIn, setUserRole }) {
             {loading ? 'Logging in...' : 'Login'}
           </button>
         </form>
-
-        <hr className="my-3" />
-        <div className="text-center text-muted small mb-2">Quick Test Login (Bypass):</div>
-        <div className="d-flex gap-2">
-          <button className="btn btn-outline-primary btn-sm w-50 fw-bold" onClick={() => handleQuickLogin('admin')}>Admin</button>
-          <button className="btn btn-outline-secondary btn-sm w-50 fw-bold" onClick={() => handleQuickLogin('user')}>User</button>
-        </div>
       </div>
     </div>
   );

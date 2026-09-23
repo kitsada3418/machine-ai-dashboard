@@ -1,25 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import { apiFetch } from '../api';
 
 function SystemLogs() {
   const [activeTab, setActiveTab] = useState('login'); // 'login' หรือ 'audit'
   const [loginLogs, setLoginLogs] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
   const [loading, setLoading] = useState(false);
-  const getAuthHeaders = () => {
-    const token = localStorage.getItem('token');
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`
-    };
-  };
 
   // ดึงข้อมูล Logs จาก Backend
   const fetchLogs = async () => {
     setLoading(true);
     try {
       const [loginRes, auditRes] = await Promise.all([
-        fetch('http://localhost:5000/api/logs/login',{ headers: getAuthHeaders() }),
-        fetch('http://localhost:5000/api/logs/audit' ,{ headers: getAuthHeaders() })
+        apiFetch('/api/logs/login'),
+        apiFetch('/api/logs/audit')
       ]);
 
       if (loginRes.ok) {
@@ -39,10 +33,35 @@ function SystemLogs() {
   };
 
   useEffect(() => {
-    fetchLogs();
-    // ตั้งค่าให้รีเฟรชข้อมูลอัตโนมัติทุกๆ 30 วินาที (ถ้าต้องการ)
-    const interval = setInterval(fetchLogs, 30000);
-    return () => clearInterval(interval);
+    let cancelled = false;
+    const load = async () => {
+      setLoading(true);
+      try {
+        const [loginRes, auditRes] = await Promise.all([
+          apiFetch('/api/logs/login'),
+          apiFetch('/api/logs/audit')
+        ]);
+        if (cancelled) return;
+        if (loginRes.ok) {
+          const loginData = await loginRes.json();
+          if (!cancelled) setLoginLogs(loginData);
+        }
+        if (auditRes.ok) {
+          const auditData = await auditRes.json();
+          if (!cancelled) setAuditLogs(auditData);
+        }
+      } catch (error) {
+        console.error('Error fetching logs:', error);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    load();
+    const interval = setInterval(load, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, []);
 
   // ฟังก์ชันจัดรูปแบบสถานะ Login ให้สวยงาม

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import 'bootstrap-icons/font/bootstrap-icons.css';
 
@@ -21,24 +21,18 @@ import Supervisor from './pages/Supervisor';
 import SystemLogs from './pages/SystemLogs';
 
 function App() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [userRole, setUserRole] = useState('user');
+  const [isLoggedIn, setIsLoggedIn] = useState(() => Boolean(localStorage.getItem('token')));
+  const [userRole, setUserRole] = useState(() => localStorage.getItem('role') || 'user');
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [selectedMachine, setSelectedMachine] = useState('');
-  const [userPermissions, setUserPermissions] = useState([]);
-
-  // โหลดสิทธิ์และสถานะ Login จาก localStorage เมื่อเปิดหน้าเว็บ
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    const role = localStorage.getItem('role');
-    const permissions = JSON.parse(localStorage.getItem('permissions') || '[]');
-
-    if (token) {
-      setIsLoggedIn(true);
-      setUserRole(role || 'user');
-      setUserPermissions(permissions);
+  const [userPermissions] = useState(() => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem('permissions') || '[]');
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
     }
-  }, []);
+  });
 
   // ฟังก์ชันตรวจสอบว่า User มีสิทธิ์เข้าหน้านี้ไหม
   const checkPermission = (pageId) => {

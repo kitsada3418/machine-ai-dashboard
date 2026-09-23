@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import { apiFetch } from '../api';
 
 function Logs({ setCurrentPage, setSelectedMachine }) {
   // 📌 1. เปลี่ยนมาดึงค่าเริ่มต้นจาก sessionStorage (ถ้าไม่มีให้เป็น 'machine')
@@ -16,41 +17,43 @@ function Logs({ setCurrentPage, setSelectedMachine }) {
     sessionStorage.setItem('logsViewMode', mode);
   };
 
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      const listParam = viewMode === 'machine' ? 'mhId_All=true' : 'empId_All=true';
-      const countParam = viewMode === 'machine' ? 'mh_count=true' : 'emp_count=true';
-
-      const [listRes, countRes] = await Promise.all([
-        fetch(`http://localhost:5000/api/production/selectData?${listParam}`),
-        fetch(`http://localhost:5000/api/production/selectData?${countParam}`)
-      ]);
-
-      if (!listRes.ok) throw new Error('Failed to fetch list data');
-
-      const listResult = await listRes.json();
-      const countResult = await countRes.json();
-
-      setDataList(listResult || []);
-
-      if (Array.isArray(countResult) && countResult.length > 0) {
-        setTotalCount(Object.values(countResult[0])[0] || 0); 
-      } else {
-        setTotalCount(countResult || 0);
-      }
-
-    } catch (error) {
-      console.error('Error fetching data:', error);
-      setDataList([]);
-      setTotalCount(0);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    fetchData();
+    let cancelled = false;
+    const run = async () => {
+      setLoading(true);
+      try {
+        const listParam = viewMode === 'machine' ? 'mhId_All=true' : 'empId_All=true';
+        const countParam = viewMode === 'machine' ? 'mh_count=true' : 'emp_count=true';
+
+        const [listRes, countRes] = await Promise.all([
+          apiFetch(`/api/production/selectData?${listParam}`),
+          apiFetch(`/api/production/selectData?${countParam}`)
+        ]);
+
+        if (!listRes.ok) throw new Error('Failed to fetch list data');
+
+        const listResult = await listRes.json();
+        const countResult = await countRes.json();
+        if (cancelled) return;
+
+        setDataList(listResult || []);
+        if (Array.isArray(countResult) && countResult.length > 0) {
+          setTotalCount(Object.values(countResult[0])[0] || 0);
+        } else {
+          setTotalCount(countResult || 0);
+        }
+      } catch (error) {
+        console.error('Error fetching data:', error);
+        if (!cancelled) {
+          setDataList([]);
+          setTotalCount(0);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    run();
+    return () => { cancelled = true; };
   }, [viewMode]);
 
   return (

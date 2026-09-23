@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { ResponsiveContainer, BarChart, LineChart, Bar, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend, LabelList } from 'recharts';
+import { apiFetch } from '../api';
 
 // ================= ฟังก์ชันวาดตัวเลขแบบเอียง (Custom Labels) =================
 const renderBarLabel = (props) => {
@@ -64,97 +65,95 @@ function Graphs() {
   const [avgTime, setAvgTime] = useState(0);
   const [loading, setLoading] = useState(false);
 
-  // ================= ฟังก์ชัน 1: ดึงรายชื่อ Dropdown =================
-  const fetchDropdownTargets = async () => {
-    try {
-      let queryParam = '';
-      if (period === 'day') queryParam = `daily=${selectedDate}`;
-      else if (period === 'month') queryParam = `monthly=${selectedDate.slice(0, 7)}`;
-      else if (period === 'year') queryParam = `yearly=${selectedDate.slice(0, 4)}`;
-      else if (period === 'allyear') queryParam = `All_year=true`;
-
-      const response = await fetch(`http://localhost:5000/api/production/targets?viewMode=${viewMode}&${queryParam}`);
-      if (!response.ok) throw new Error('Failed to fetch targets');
-      const result = await response.json();
-      
-      setAvailableTargets(result);
-
-      if (selectedTarget !== 'all' && !result.includes(selectedTarget)) {
-        setSelectedTarget('all');
-      }
-    } catch (error) {
-      console.error('Error fetching dropdown targets:', error);
-      setAvailableTargets([]);
-    }
-  };
-
-  // ================= ฟังก์ชัน 2: ดึงข้อมูลกราฟ =================
-  const fetchGraphData = async () => {
-    setLoading(true);
-    try {
-      let queryParam = '';
-      if (period === 'day') queryParam = `daily=${selectedDate}`;
-      else if (period === 'month') queryParam = `monthly=${selectedDate.slice(0, 7)}`;
-      else if (period === 'year') queryParam = `yearly=${selectedDate.slice(0, 4)}`;
-      else if (period === 'allyear') queryParam = `All_year=true`;
-
-      let filterTargetParam = '';
-      if (selectedTarget && selectedTarget !== 'all') {
-        if (viewMode === 'machine') filterTargetParam = `&mhId=${selectedTarget}`;
-        else filterTargetParam = `&empId=${selectedTarget}`;
-      }
-
-      const response = await fetch(`http://localhost:5000/api/production/filter?${queryParam}${filterTargetParam}`);
-      if (!response.ok) throw new Error('Failed to fetch data');
-      const result = await response.json();
-      
-      const activeCount = availableTargets.length || 1; // หาจำนวนเครื่อง/คน เพื่อนำไปหารเฉลี่ย
-
-      const formattedData = result.map(item => {
-          let displayName = item.hour || item.log_month || item.log_year;
-          if (item.log_date) displayName = item.log_date.slice(5);
-
-          const rawQty = Number(item.ok) || 0;
-          // ถ้าเลือก All ให้เอายอด rawQty ไปหารจำนวนเครื่อง/คน
-          const displayQty = selectedTarget === 'all' ? Math.round(rawQty / activeCount) : rawQty;
-
-          return {
-            name: displayName,
-            totalQty: rawQty, // เก็บยอดเต็มไว้โชว์ใน Tooltip
-            qty: displayQty,  // ค่ายอดเฉลี่ยที่จะวาดบนกราฟ
-            cycle: Number(item.cycle) || 0,
-            activeCount: selectedTarget === 'all' ? activeCount : 1
-          };
-        });
-
-      setChartData(formattedData);
-      
-      // การสรุปยอด Total ด้านล่างต้องดึงจากยอดเต็ม (totalQty) เสมอ
-      const total = formattedData.reduce((sum, item) => sum + item.totalQty, 0);
-      setTotalOutput(total);
-
-      const avg = formattedData.length > 0 
-        ? formattedData.reduce((sum, item) => sum + item.cycle, 0) / formattedData.length 
-        : 0;
-      setAvgTime(avg);
-
-    } catch (error) {
-      console.error('Error fetching graph data:', error);
-      setChartData([]);
-      setTotalOutput(0);
-      setAvgTime(0);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    fetchDropdownTargets();
-  }, [viewMode, period, selectedDate]);
+    let cancelled = false;
+    const run = async () => {
+      try {
+        let queryParam = '';
+        if (period === 'day') queryParam = `daily=${selectedDate}`;
+        else if (period === 'month') queryParam = `monthly=${selectedDate.slice(0, 7)}`;
+        else if (period === 'year') queryParam = `yearly=${selectedDate.slice(0, 4)}`;
+        else if (period === 'allyear') queryParam = `All_year=true`;
+
+        const response = await apiFetch(`/api/production/targets?viewMode=${viewMode}&${queryParam}`);
+        if (!response.ok) throw new Error('Failed to fetch targets');
+        const result = await response.json();
+        if (cancelled) return;
+
+        setAvailableTargets(result);
+        if (selectedTarget !== 'all' && !result.includes(selectedTarget)) {
+          setSelectedTarget('all');
+        }
+      } catch (error) {
+        console.error('Error fetching dropdown targets:', error);
+        if (!cancelled) setAvailableTargets([]);
+      }
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [viewMode, period, selectedDate, selectedTarget]);
 
   // **สำคัญ**: เพิ่ม availableTargets เป็น dependency เพื่อให้กราฟอัปเดตตัวหารให้ถูกต้องเมื่อ dropdown เปลี่ยนแปลง
   useEffect(() => {
-    fetchGraphData();
+    let cancelled = false;
+    const run = async () => {
+      setLoading(true);
+      try {
+        let queryParam = '';
+        if (period === 'day') queryParam = `daily=${selectedDate}`;
+        else if (period === 'month') queryParam = `monthly=${selectedDate.slice(0, 7)}`;
+        else if (period === 'year') queryParam = `yearly=${selectedDate.slice(0, 4)}`;
+        else if (period === 'allyear') queryParam = `All_year=true`;
+
+        let filterTargetParam = '';
+        if (selectedTarget && selectedTarget !== 'all') {
+          if (viewMode === 'machine') filterTargetParam = `&mhId=${selectedTarget}`;
+          else filterTargetParam = `&empId=${selectedTarget}`;
+        }
+
+        const response = await apiFetch(`/api/production/filter?${queryParam}${filterTargetParam}`);
+        if (!response.ok) throw new Error('Failed to fetch data');
+        const result = await response.json();
+        if (cancelled) return;
+
+        const activeCount = availableTargets.length || 1;
+
+        const formattedData = result.map(item => {
+            let displayName = item.hour || item.log_month || item.log_year;
+            if (item.log_date) displayName = item.log_date.slice(5);
+
+            const rawQty = Number(item.ok) || 0;
+            const displayQty = selectedTarget === 'all' ? Math.round(rawQty / activeCount) : rawQty;
+
+            return {
+              name: displayName,
+              totalQty: rawQty,
+              qty: displayQty,
+              cycle: Number(item.cycle) || 0,
+              activeCount: selectedTarget === 'all' ? activeCount : 1
+            };
+          });
+
+        setChartData(formattedData);
+        const total = formattedData.reduce((sum, item) => sum + item.totalQty, 0);
+        setTotalOutput(total);
+        const avg = formattedData.length > 0
+          ? formattedData.reduce((sum, item) => sum + item.cycle, 0) / formattedData.length
+          : 0;
+        setAvgTime(avg);
+      } catch (error) {
+        console.error('Error fetching graph data:', error);
+        if (!cancelled) {
+          setChartData([]);
+          setTotalOutput(0);
+          setAvgTime(0);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    run();
+    return () => { cancelled = true; };
   }, [viewMode, period, selectedDate, selectedTarget, availableTargets]);
 
   const qtyLegendName = selectedTarget === 'all' ? `Avg Quantity per ${viewMode === 'machine' ? 'Machine' : 'Employee'} (Pcs)` : 'Quantity (Pcs)';

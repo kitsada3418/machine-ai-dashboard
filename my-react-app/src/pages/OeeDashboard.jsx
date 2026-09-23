@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import { apiFetch } from '../api';
 
 function OeeDashboard() {
   const [filterDate, setFilterDate] = useState(new Date().toISOString().split('T')[0]);
@@ -6,123 +7,89 @@ function OeeDashboard() {
   const [summary, setSummary] = useState({ avgOee: 0, avgA: 0, avgP: 0, avgQ: 0 });
   const [loading, setLoading] = useState(false);
 
-  // ฟังก์ชันดึงข้อมูลและคำนวณ OEE
-  const fetchOeeData = async () => {
-    setLoading(true);
-    try {
-      // ดึงข้อมูล 2 API พร้อมกัน: 1. ข้อมูลการผลิต (หา Q, P, และเวลาเดินเครื่อง) 2. ข้อมูลหยุดเครื่อง (หา Downtime)
-      const [datalogRes, downtimeRes] = await Promise.all([
-        fetch(`http://localhost:5000/api/datalog?date=${filterDate}`),
-        fetch(`http://localhost:5000/api/production/downtime?datetime=${filterDate}&sum=true`)
-      ]);
-
-      const datalog = await datalogRes.json();
-      const downtime = await downtimeRes.json();
-
-      // 1. สร้าง Object เพื่อจัดกลุ่มข้อมูลตามรายเครื่องจักร
-      const machineStats = {};
-
-      // ประมวลผลจาก Data Log (หา Quality, Performance, Run Time)
-      datalog.forEach(job => {
-        const mh = job.Mh_ID;
-        if (!mh) return;
-        if (!machineStats[mh]) {
-          machineStats[mh] = { ok: 0, ng: 0, orderQty: 0, runTimeMins: 0, downTimeMins: 0 };
-        }
-
-        machineStats[mh].ok += Number(job.OK) || 0;
-        machineStats[mh].ng += Number(job.NG) || 0;
-        machineStats[mh].orderQty += Number(job.order_qty) || 0;
-
-        // คำนวณเวลาที่ใช้รันงาน (นาที) เพื่อนำไปหา Availability
-        if (job.Start_Time && job.End_Time) {
-          const start = new Date(job.Start_Time);
-          const end = new Date(job.End_Time);
-          const diffMins = (end - start) / (1000 * 60);
-          if (diffMins > 0) machineStats[mh].runTimeMins += diffMins;
-        }
-      });
-
-      // ประมวลผลจาก Downtime Log (หาเวลาหยุดเครื่อง)
-      downtime.forEach(dt => {
-        const mh = dt.Mh_ID;
-        if (!mh) return;
-        if (!machineStats[mh]) {
-          machineStats[mh] = { ok: 0, ng: 0, orderQty: 0, runTimeMins: 0, downTimeMins: 0 };
-        }
-        machineStats[mh].downTimeMins += Number(dt.total_stop_minutes) || 0;
-      });
-
-      // 2. คำนวณ A, P, Q และ OEE สำหรับแต่ละเครื่อง
-      let sumA = 0, sumP = 0, sumQ = 0, sumOee = 0;
-      let machineCount = 0;
-
-      const finalData = Object.keys(machineStats).map(mh => {
-        const stat = machineStats[mh];
-        const totalProduced = stat.ok + stat.ng;
-
-        // Q: Quality = ดี / ทั้งหมด
-        const q = totalProduced > 0 ? (stat.ok / totalProduced) * 100 : 0;
-
-        // A: Availability = เวลาเดินเครื่อง / (เวลาเดินเครื่อง + เวลาหยุดเครื่อง)
-        const totalPlanned = stat.runTimeMins + stat.downTimeMins;
-        const a = totalPlanned > 0 ? (stat.runTimeMins / totalPlanned) * 100 : (stat.runTimeMins > 0 ? 100 : 0);
-
-        // P: Performance = ยอดที่ทำได้ / Target (Order Qty) -> จำกัดไว้ไม่เกิน 100%
-        let p = stat.orderQty > 0 ? (totalProduced / stat.orderQty) * 100 : (totalProduced > 0 ? 100 : 0);
-        if (p > 100) p = 100; 
-
-        // OEE = A * P * Q
-        const oee = (a / 100) * (p / 100) * (q / 100) * 100;
-
-        // กำหนด Status
-        let status = 'Good';
-        if (oee >= 80) status = 'Excellent';
-        else if (oee >= 60) status = 'Warning';
-        else status = 'Critical';
-
-        if (totalProduced > 0 || stat.downTimeMins > 0) {
-          sumA += a; sumP += p; sumQ += q; sumOee += oee;
-          machineCount++;
-        }
-
-        return {
-          machine: mh,
-          availability: a,
-          performance: p,
-          quality: q,
-          oee: oee,
-          status: status
-        };
-      });
-
-      // จัดเรียง OEE จากมากไปน้อย
-      finalData.sort((x, y) => y.oee - x.oee);
-
-      setOeeData(finalData);
-
-      // 3. อัปเดตยอดสรุปรวม (Summary)
-      if (machineCount > 0) {
-        setSummary({
-          avgA: sumA / machineCount,
-          avgP: sumP / machineCount,
-          avgQ: sumQ / machineCount,
-          avgOee: sumOee / machineCount
-        });
-      } else {
-        setSummary({ avgA: 0, avgP: 0, avgQ: 0, avgOee: 0 });
-      }
-
-    } catch (error) {
-      console.error('Error calculating OEE:', error);
-      setOeeData([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    fetchOeeData();
+    let cancelled = false;
+    const run = async () => {
+      setLoading(true);
+      try {
+        const [datalogRes, downtimeRes] = await Promise.all([
+          apiFetch(`/api/datalog?date=${filterDate}`),
+          apiFetch(`/api/production/downtime?datetime=${filterDate}&sum=true`)
+        ]);
+        const datalogRaw = await datalogRes.json();
+        const downtimeRaw = await downtimeRes.json();
+        const datalog = Array.isArray(datalogRaw) ? datalogRaw : [];
+        const downtime = Array.isArray(downtimeRaw) ? downtimeRaw : [];
+        if (cancelled) return;
+
+        const machineStats = {};
+        datalog.forEach(job => {
+          const mh = job.Mh_ID;
+          if (!mh) return;
+          if (!machineStats[mh]) {
+            machineStats[mh] = { ok: 0, ng: 0, orderQty: 0, runTimeMins: 0, downTimeMins: 0 };
+          }
+          machineStats[mh].ok += Number(job.OK) || 0;
+          machineStats[mh].ng += Number(job.NG) || 0;
+          machineStats[mh].orderQty += Number(job.order_qty) || 0;
+          if (job.Start_Time && job.End_Time) {
+            const start = new Date(job.Start_Time);
+            const end = new Date(job.End_Time);
+            const diffMins = (end - start) / (1000 * 60);
+            if (diffMins > 0) machineStats[mh].runTimeMins += diffMins;
+          }
+        });
+        downtime.forEach(dt => {
+          const mh = dt.Mh_ID;
+          if (!mh) return;
+          if (!machineStats[mh]) {
+            machineStats[mh] = { ok: 0, ng: 0, orderQty: 0, runTimeMins: 0, downTimeMins: 0 };
+          }
+          machineStats[mh].downTimeMins += Number(dt.total_stop_minutes) || 0;
+        });
+
+        let sumA = 0, sumP = 0, sumQ = 0, sumOee = 0;
+        let machineCount = 0;
+        const finalData = Object.keys(machineStats).map(mh => {
+          const stat = machineStats[mh];
+          const totalProduced = stat.ok + stat.ng;
+          const q = totalProduced > 0 ? (stat.ok / totalProduced) * 100 : 0;
+          const totalPlanned = stat.runTimeMins + stat.downTimeMins;
+          const a = totalPlanned > 0 ? (stat.runTimeMins / totalPlanned) * 100 : (stat.runTimeMins > 0 ? 100 : 0);
+          let p = stat.orderQty > 0 ? (totalProduced / stat.orderQty) * 100 : (totalProduced > 0 ? 100 : 0);
+          if (p > 100) p = 100;
+          const oee = (a / 100) * (p / 100) * (q / 100) * 100;
+          let status;
+          if (oee >= 80) status = 'Excellent';
+          else if (oee >= 60) status = 'Warning';
+          else status = 'Critical';
+          if (totalProduced > 0 || stat.downTimeMins > 0) {
+            sumA += a; sumP += p; sumQ += q; sumOee += oee;
+            machineCount++;
+          }
+          return { machine: mh, availability: a, performance: p, quality: q, oee, status };
+        });
+        finalData.sort((x, y) => y.oee - x.oee);
+        setOeeData(finalData);
+        if (machineCount > 0) {
+          setSummary({
+            avgA: sumA / machineCount,
+            avgP: sumP / machineCount,
+            avgQ: sumQ / machineCount,
+            avgOee: sumOee / machineCount
+          });
+        } else {
+          setSummary({ avgA: 0, avgP: 0, avgQ: 0, avgOee: 0 });
+        }
+      } catch (error) {
+        console.error('Error calculating OEE:', error);
+        if (!cancelled) setOeeData([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    run();
+    return () => { cancelled = true; };
   }, [filterDate]);
 
   return (

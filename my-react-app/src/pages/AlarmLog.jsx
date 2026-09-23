@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { apiFetch } from '../api';
 
 function AlarmLog() {
   const [logs, setLogs] = useState([]);
@@ -15,6 +16,7 @@ function AlarmLog() {
   const [filterMh, setFilterMh] = useState('all');
   const [filterEmp, setFilterEmp] = useState('all');
   const [isSummary, setIsSummary] = useState(false); 
+  const [refreshTick, setRefreshTick] = useState(0);
   
   // ================= STATE FOR DROPDOWNS =================
   const [machineOptions, setMachineOptions] = useState([]);
@@ -33,68 +35,72 @@ function AlarmLog() {
     return filterDate;
   };
 
-  // 📌 2. ฟังก์ชันอัปเดต Dropdown ให้แสดงเฉพาะข้อมูลที่มีในวันนั้น
-  const fetchOptionsForDate = async () => {
-    try {
-      const queryParams = new URLSearchParams();
-      const datetime = getFormattedDatetime();
-      if (datetime) queryParams.append('datetime', datetime);
-      
-      const response = await fetch(`http://localhost:5000/api/production/downtime?${queryParams.toString()}`);
-      if (!response.ok) throw new Error('Failed to fetch options');
-      
-      const rawData = await response.json();
-      
-      const uniqueMh = [...new Set(rawData.map(item => item.Mh_ID).filter(Boolean))].sort();
-      const uniqueEmp = [...new Set(rawData.map(item => item.Emp_ID).filter(Boolean))].sort();
-      
-      setMachineOptions(uniqueMh);
-      setEmployeeOptions(uniqueEmp);
-
-      setFilterMh(prev => uniqueMh.includes(prev) ? prev : 'all');
-      setFilterEmp(prev => uniqueEmp.includes(prev) ? prev : 'all');
-
-    } catch (error) {
-      console.error('Error fetching dropdown options:', error);
-      setMachineOptions([]);
-      setEmployeeOptions([]);
-    }
-  };
+  // 📌 2. ฟังก์ชันอัปเดต Dropdown ให้แสดงเฉพาะข้อมูลที่มีในวันนั้น (เรียกจาก useEffect ภายใน)
 
   useEffect(() => {
-    fetchOptionsForDate();
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const queryParams = new URLSearchParams();
+        const datetime = getFormattedDatetime();
+        if (datetime) queryParams.append('datetime', datetime);
+
+        const response = await apiFetch(`/api/production/downtime?${queryParams.toString()}`);
+        if (!response.ok) throw new Error('Failed to fetch options');
+        const rawData = await response.json();
+        if (cancelled) return;
+
+        const uniqueMh = [...new Set(rawData.map(item => item.Mh_ID).filter(Boolean))].sort();
+        const uniqueEmp = [...new Set(rawData.map(item => item.Emp_ID).filter(Boolean))].sort();
+        setMachineOptions(uniqueMh);
+        setEmployeeOptions(uniqueEmp);
+        setFilterMh(prev => uniqueMh.includes(prev) ? prev : 'all');
+        setFilterEmp(prev => uniqueEmp.includes(prev) ? prev : 'all');
+      } catch (error) {
+        console.error('Error fetching dropdown options:', error);
+        if (!cancelled) {
+          setMachineOptions([]);
+          setEmployeeOptions([]);
+        }
+      }
+    };
+    run();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterDate, filterPeriod]);
 
-  // 📌 3. ฟังก์ชันดึงข้อมูลบันทึกการหยุดเครื่อง
-  const fetchLogs = async () => {
-    setLoading(true);
-    try {
-      const queryParams = new URLSearchParams();
-      
-      const datetime = getFormattedDatetime();
-      if (datetime) queryParams.append('datetime', datetime);
-      
-      if (filterMh !== 'all') queryParams.append('mhId', filterMh);
-      if (filterEmp !== 'all') queryParams.append('empId', filterEmp);
-      if (isSummary) queryParams.append('sum', 'true');
-
-      const response = await fetch(`http://localhost:5000/api/production/downtime?${queryParams.toString()}`);
-      if (!response.ok) throw new Error('Failed to fetch downtime logs');
-      
-      const result = await response.json();
-      setLogs(result || []);
-      setCurrentPage(1);
-    } catch (error) {
-      console.error('Error fetching downtime logs:', error);
-      setLogs([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // 📌 3. ฟังก์ชันดึงข้อมูลบันทึกการหยุดเครื่อง (เรียกจาก useEffect ภายใน + ปุ่ม Refresh)
 
   useEffect(() => {
-    fetchLogs();
-  }, [filterPeriod, filterDate, filterMh, filterEmp, isSummary]); 
+    let cancelled = false;
+    const run = async () => {
+      setLoading(true);
+      try {
+        const queryParams = new URLSearchParams();
+        const datetime = getFormattedDatetime();
+        if (datetime) queryParams.append('datetime', datetime);
+        if (filterMh !== 'all') queryParams.append('mhId', filterMh);
+        if (filterEmp !== 'all') queryParams.append('empId', filterEmp);
+        if (isSummary) queryParams.append('sum', 'true');
+
+        const response = await apiFetch(`/api/production/downtime?${queryParams.toString()}`);
+        if (!response.ok) throw new Error('Failed to fetch downtime logs');
+        const result = await response.json();
+        if (!cancelled) {
+          setLogs(result || []);
+          setCurrentPage(1);
+        }
+      } catch (error) {
+        console.error('Error fetching downtime logs:', error);
+        if (!cancelled) setLogs([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    run();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterPeriod, filterDate, filterMh, filterEmp, isSummary, refreshTick]);
 
   // ================= PREPARE DATA (SUM & CHART) =================
   // คำนวณยอดรวมเวลาหยุดเครื่องทั้งหมดของตารางนี้
@@ -210,7 +216,7 @@ function AlarmLog() {
             <small className="text-muted" style={{ fontSize: '0.75rem' }}>Show total minutes only</small>
           </div>
           <div className="col-md-2">
-            <button className="btn btn-danger w-100 fw-bold shadow-sm" onClick={fetchLogs}>
+            <button className="btn btn-danger w-100 fw-bold shadow-sm" onClick={() => setRefreshTick(t => t + 1)}>
               <i className="bi bi-search me-2"></i> Refresh
             </button>
           </div>

@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import { apiFetch } from '../api';
 
 const getCurrentMonth = () => {
     const today = new Date();
@@ -40,7 +41,7 @@ function LogDetail({ setCurrentPage, machineId }) {
       if (filterDate) queryParams.append('date', filterDate);
       if (filterJob.trim() !== '') queryParams.append('jobId', filterJob.trim());
 
-      const response = await fetch(`http://localhost:5000/api/datalog?${queryParams.toString()}`);
+      const response = await apiFetch(`/api/datalog?${queryParams.toString()}`);
       if (!response.ok) throw new Error('Failed to fetch logs');
       
       const result = await response.json();
@@ -54,9 +55,37 @@ function LogDetail({ setCurrentPage, machineId }) {
     }
   };
 
-  // ดึงข้อมูลครั้งแรกเมื่อเปิดหน้านี้ และเมื่อเปลี่ยนวันที่
   useEffect(() => {
-    fetchLogs();
+    let cancelled = false;
+    const run = async () => {
+      setLoading(true);
+      try {
+        const queryParams = new URLSearchParams();
+        if (isEmployee) {
+          queryParams.append('empId', targetId);
+        } else {
+          queryParams.append('mhId', targetId);
+        }
+        if (filterDate) queryParams.append('date', filterDate);
+        if (filterJob.trim() !== '') queryParams.append('jobId', filterJob.trim());
+
+        const response = await apiFetch(`/api/datalog?${queryParams.toString()}`);
+        if (!response.ok) throw new Error('Failed to fetch logs');
+        const result = await response.json();
+        if (!cancelled) {
+          setAllLogs(result || []);
+          setCurrentPageNum(1);
+        }
+      } catch (error) {
+        console.error('Error fetching logs:', error);
+        if (!cancelled) setAllLogs([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    run();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterDate]);
 
   // ================= PAGINATION LOGIC =================

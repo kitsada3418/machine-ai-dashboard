@@ -1,55 +1,49 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const rateLimit = require('express-rate-limit');
+const { SECRET_KEY, authenticateToken, requireRole, getActionBy } = require('./authMiddleware');
 const router = express.Router();
 
-const SECRET_KEY = process.env.JWT_SECRET || 'your_jwt_secret_key_here';
+const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { message: 'พยายามเข้าสู่ระบบบ่อยเกินไป กรุณารอสักครู่' }
+});
 
-// Middleware สำหรับตรวจสอบสิทธิ์ Token
-const authenticateToken = (req, res, next) => {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1]; // ดึงค่าจาก Bearer Token
-
-    if (!token) {
-        return res.status(401).json({ message: 'Access Denied: ไม่พบ Token ยืนยันตัวตน' });
-    }
-
-    jwt.verify(token, SECRET_KEY, (err, user) => {
-        if (err) {
-            return res.status(403).json({ message: 'Access Denied: Token ไม่ถูกต้องหรือหมดอายุ' });
-        }
-        req.user = user; 
-        next(); 
-    });
-};
+const isValidPassword = (password) => typeof password === 'string' && password.length >= 8;
 
 // ==========================================
-// 1. ระบบ Login & บันทึก Login Logs (ห้ามใส่ authenticateToken)
+// 1. ระบบ Login & บันทึก Login Logs
 // ==========================================
-router.post('/login', async (req, res) => {
+router.post('/login', loginLimiter, async (req, res) => {
     const { username, password } = req.body;
-    
-    let userIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip || 'Unknown';
+
+    let userIp = req.socket.remoteAddress || req.ip || 'Unknown';
     if (userIp === '::1' || userIp === '::ffff:127.0.0.1') {
         userIp = '127.0.0.1 (Localhost)';
     }
 
     const pool = req.app.get('pool');
+    const invalidCredentials = 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง';
 
     try {
         const [users] = await pool.query('SELECT * FROM users WHERE username = ?', [username]);
-        
+
         if (users.length === 0) {
+            await bcrypt.compare(password || '', '$2b$10$invalidhashinvalidhashinvalidhashinvalidhashinvalidhashinv');
             await pool.query('INSERT INTO login_logs (username, ip_address, status) VALUES (?, ?, ?)', [username, userIp, 'Failed']);
-            return res.status(401).json({ message: 'ไม่พบชื่อผู้ใช้งานนี้' });
+            return res.status(401).json({ message: invalidCredentials });
         }
 
         const user = users[0];
         const isMatch = await bcrypt.compare(password, user.password);
-        
+
         if (!isMatch) {
             await pool.query('INSERT INTO login_logs (username, ip_address, status) VALUES (?, ?, ?)', [username, userIp, 'Failed']);
-            return res.status(401).json({ message: 'รหัสผ่านไม่ถูกต้อง' });
+            return res.status(401).json({ message: invalidCredentials });
         }
 
         if (user.status !== 'Active') {
@@ -58,15 +52,19 @@ router.post('/login', async (req, res) => {
         }
 
         await pool.query('INSERT INTO login_logs (username, ip_address, status) VALUES (?, ?, ?)', [username, userIp, 'Success']);
-        
-        const token = jwt.sign({ id: user.id, username: user.username, role: user.role, permissions: user.permissions }, SECRET_KEY, { expiresIn: '8h' });
-        
 
-        res.json({ 
-            message: 'เข้าสู่ระบบสำเร็จ', 
-            token, role: user.role,
-            permissions: user.permissions});
+        const token = jwt.sign(
+            { id: user.id, username: user.username, role: user.role, permissions: user.permissions },
+            SECRET_KEY,
+            { expiresIn: '8h' }
+        );
 
+        res.json({
+            message: 'เข้าสู่ระบบสำเร็จ',
+            token,
+            role: user.role,
+            permissions: user.permissions
+        });
     } catch (error) {
         console.error('Login Error:', error);
         res.status(500).send('Server Error');
@@ -74,7 +72,7 @@ router.post('/login', async (req, res) => {
 });
 
 // ==========================================
-// 2. จัดการ Roles (ต้องใช้ authenticateToken)
+// 2. จัดการ Roles
 // ==========================================
 router.get('/roles', authenticateToken, async (req, res) => {
     const pool = req.app.get('pool');
@@ -86,7 +84,7 @@ router.get('/roles', authenticateToken, async (req, res) => {
     }
 });
 
-router.post('/roles', authenticateToken, async (req, res) => {
+router.post('/roles', authenticateToken, requireRole('admin'), async (req, res) => {
     const { value, label } = req.body;
     const pool = req.app.get('pool');
     try {
@@ -98,9 +96,9 @@ router.post('/roles', authenticateToken, async (req, res) => {
 });
 
 // ==========================================
-// 3. จัดการ Users & บันทึก Audit Logs (ต้องใช้ authenticateToken)
+// 3. จัดการ Users & บันทึก Audit Logs
 // ==========================================
-router.get('/users', authenticateToken, async (req, res) => {
+router.get('/users', authenticateToken, requireRole('admin'), async (req, res) => {
     const pool = req.app.get('pool');
     try {
         const [users] = await pool.query('SELECT id, username, role, permissions, status, created_at FROM users');
@@ -110,10 +108,14 @@ router.get('/users', authenticateToken, async (req, res) => {
     }
 });
 
-router.post('/users', authenticateToken, async (req, res) => {
+router.post('/users', authenticateToken, requireRole('admin'), async (req, res) => {
     const { username, password, role, permissions } = req.body;
     const pool = req.app.get('pool');
-    const actionBy = req.body.actionBy || req.user?.username || 'System'; 
+    const actionBy = getActionBy(req);
+
+    if (!isValidPassword(password)) {
+        return res.status(400).json({ message: 'รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร' });
+    }
 
     try {
         const salt = await bcrypt.genSalt(10);
@@ -137,14 +139,21 @@ router.post('/users', authenticateToken, async (req, res) => {
     }
 });
 
-router.delete('/users/:id', authenticateToken, async (req, res) => {
-    const userId = req.params.id;
+router.delete('/users/:id', authenticateToken, requireRole('admin'), async (req, res) => {
+    const userId = Number(req.params.id);
     const pool = req.app.get('pool');
-    const actionBy = req.query.actionBy || req.user?.username || 'System';
+    const actionBy = getActionBy(req);
 
     try {
-        const [oldData] = await pool.query('SELECT username, role FROM users WHERE id = ?', [userId]);
+        if (Number.isNaN(userId) || userId === req.user.id) {
+            return res.status(400).json({ message: 'ไม่สามารถลบบัญชีของตนเองได้' });
+        }
+
+        const [oldData] = await pool.query('SELECT id, username, role FROM users WHERE id = ?', [userId]);
         if (oldData.length === 0) return res.status(404).json({ message: 'ไม่พบข้อมูลผู้ใช้' });
+        if (oldData[0].role === 'admin') {
+            return res.status(403).json({ message: 'ไม่สามารถลบผู้ใช้ที่มีบทบาท admin ได้' });
+        }
 
         await pool.query('DELETE FROM users WHERE id = ?', [userId]);
 
@@ -160,9 +169,9 @@ router.delete('/users/:id', authenticateToken, async (req, res) => {
 });
 
 // ==========================================
-// 4. ดึงข้อมูล Logs ไปแสดงผล (ต้องใช้ authenticateToken)
+// 4. ดึงข้อมูล Logs ไปแสดงผล
 // ==========================================
-router.get('/logs/login', authenticateToken, async (req, res) => {
+router.get('/logs/login', authenticateToken, requireRole('admin'), async (req, res) => {
     const pool = req.app.get('pool');
     try {
         const [logs] = await pool.query('SELECT * FROM login_logs ORDER BY login_time DESC LIMIT 100');
@@ -172,7 +181,7 @@ router.get('/logs/login', authenticateToken, async (req, res) => {
     }
 });
 
-router.get('/logs/audit', authenticateToken, async (req, res) => {
+router.get('/logs/audit', authenticateToken, requireRole('admin'), async (req, res) => {
     const pool = req.app.get('pool');
     try {
         const [logs] = await pool.query('SELECT * FROM audit_logs ORDER BY action_time DESC LIMIT 100');
@@ -182,15 +191,18 @@ router.get('/logs/audit', authenticateToken, async (req, res) => {
     }
 });
 
-router.put('/users/:id/reset-password', authenticateToken, async (req, res) => {
-    const userId = req.params.id;
+router.put('/users/:id/reset-password', authenticateToken, requireRole('admin'), async (req, res) => {
+    const userId = Number(req.params.id);
     const { newPassword } = req.body;
-    const actionBy = req.body.actionBy || req.user?.username || 'admin';
+    const actionBy = getActionBy(req);
     const pool = req.app.get('pool');
 
     try {
         if (!newPassword) {
             return res.status(400).json({ message: 'กรุณากรอกรหัสผ่านใหม่' });
+        }
+        if (!isValidPassword(newPassword)) {
+            return res.status(400).json({ message: 'รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร' });
         }
 
         const salt = await bcrypt.genSalt(10);
@@ -217,10 +229,10 @@ router.put('/users/:id/reset-password', authenticateToken, async (req, res) => {
     }
 });
 
-router.put('/users/:id', authenticateToken, async (req, res) => {
-    const userId = req.params.id;
+router.put('/users/:id', authenticateToken, requireRole('admin'), async (req, res) => {
+    const userId = Number(req.params.id);
     const { role, permissions } = req.body;
-    const actionBy = req.body.actionBy || req.user?.username || 'admin';
+    const actionBy = getActionBy(req);
     const pool = req.app.get('pool');
 
     try {
@@ -239,11 +251,11 @@ router.put('/users/:id', authenticateToken, async (req, res) => {
         await pool.query(
             `INSERT INTO audit_logs (username, action_type, target_table, target_id, old_value, new_value) VALUES (?, ?, ?, ?, ?, ?)`,
             [
-                actionBy, 
-                'UPDATE', 
-                'users', 
-                userId, 
-                JSON.stringify(oldData[0]), 
+                actionBy,
+                'UPDATE',
+                'users',
+                userId,
+                JSON.stringify(oldData[0]),
                 JSON.stringify({ role, permissions })
             ]
         );

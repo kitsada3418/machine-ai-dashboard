@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import { apiFetch, safeParse } from '../api';
 
 function UserManagement() {
   const availablePages = [
@@ -29,27 +30,18 @@ function UserManagement() {
   const [newRole, setNewRole] = useState('user');
   const [newPermissions, setNewPermissions] = useState(availablePages.map(p => p.id));
 
-  // ฟังก์ชันดึง Token สำหรับแนบไปกับ API ทุกตัว
-  const getAuthHeaders = () => {
-    const token = localStorage.getItem('token');
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`
-    };
-  };
-
   const fetchData = async () => {
     try {
       const [usersRes, rolesRes] = await Promise.all([
-        fetch('http://localhost:5000/api/users', { headers: getAuthHeaders() }),  
-        fetch('http://localhost:5000/api/roles', { headers: getAuthHeaders() })
+        apiFetch('/api/users'),
+        apiFetch('/api/roles')
       ]);
 
       if (usersRes.ok) {
         const usersData = await usersRes.json();
         const formattedUsers = usersData.map(u => ({
           ...u,
-          permissions: typeof u.permissions === 'string' ? JSON.parse(u.permissions) : (u.permissions || [])
+          permissions: typeof u.permissions === 'string' ? safeParse(u.permissions, []) : (u.permissions || [])
         }));
         setUsers(formattedUsers);
       }
@@ -64,7 +56,33 @@ function UserManagement() {
   };
 
   useEffect(() => {
-    fetchData();
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const [usersRes, rolesRes] = await Promise.all([
+          apiFetch('/api/users'),
+          apiFetch('/api/roles')
+        ]);
+        if (cancelled) return;
+
+        if (usersRes.ok) {
+          const usersData = await usersRes.json();
+          const formattedUsers = usersData.map(u => ({
+            ...u,
+            permissions: typeof u.permissions === 'string' ? safeParse(u.permissions, []) : (u.permissions || [])
+          }));
+          setUsers(formattedUsers);
+        }
+        if (rolesRes.ok) {
+          const rolesData = await rolesRes.json();
+          setRoles(rolesData);
+        }
+      } catch (error) {
+        console.error('Error fetching data:', error);
+      }
+    };
+    run();
+    return () => { cancelled = true; };
   }, []);
 
   const handlePermissionChange = (pageId) => {
@@ -86,9 +104,8 @@ function UserManagement() {
     if (customRoleName && customRoleName.trim() !== '') {
       const roleValue = customRoleName.trim().toLowerCase().replace(/\s+/g, '_');
       try {
-        const response = await fetch('http://localhost:5000/api/roles', {
+        const response = await apiFetch('/api/roles', {
           method: 'POST',
-          headers: getAuthHeaders(), // 🔑 ใส่ Token
           body: JSON.stringify({ value: roleValue, label: customRoleName.trim() })
         });
 
@@ -135,13 +152,11 @@ function UserManagement() {
     try {
       if (editingId) {
         // อัปเดตข้อมูล (Role / Permissions) ของผู้ใช้ที่มีอยู่
-        const response = await fetch(`http://localhost:5000/api/users/${editingId}`, {
+        const response = await apiFetch(`/api/users/${editingId}`, {
           method: 'PUT',
-          headers: getAuthHeaders(), // 🔑 ใส่ Token
           body: JSON.stringify({
             role: newRole,
-            permissions: newPermissions,
-            actionBy: 'admin'
+            permissions: newPermissions
           })
         });
 
@@ -160,15 +175,13 @@ function UserManagement() {
           return;
         }
 
-        const response = await fetch('http://localhost:5000/api/users', {
+        const response = await apiFetch('/api/users', {
           method: 'POST',
-          headers: getAuthHeaders(), // 🔑 ใส่ Token
           body: JSON.stringify({
             username: newUsername,
             password: newPassword,
             role: newRole,
-            permissions: newPermissions,
-            actionBy: 'admin' 
+            permissions: newPermissions
           })
         });
 
@@ -191,10 +204,9 @@ function UserManagement() {
     const newPass = window.prompt(`ระบุรหัสผ่านใหม่สำหรับผู้ใช้ [ ${username} ]:`);
     if (newPass && newPass.trim() !== '') {
       try {
-        const response = await fetch(`http://localhost:5000/api/users/${userId}/reset-password`, {
+        const response = await apiFetch(`/api/users/${userId}/reset-password`, {
           method: 'PUT',
-          headers: getAuthHeaders(), // 🔑 ใส่ Token
-          body: JSON.stringify({ newPassword: newPass.trim(), actionBy: 'admin' })
+          body: JSON.stringify({ newPassword: newPass.trim() })
         });
 
         if (response.ok) {
@@ -212,9 +224,8 @@ function UserManagement() {
   const handleDeleteUser = async (id) => {
     if (window.confirm('ยืนยันการลบผู้ใช้นี้?')) {
       try {
-        const response = await fetch(`http://localhost:5000/api/users/${id}?actionBy=admin`, {
-          method: 'DELETE',
-          headers: getAuthHeaders() // 🔑 ใส่ Token
+        const response = await apiFetch(`/api/users/${id}`, {
+          method: 'DELETE'
         });
 
         if (response.ok) {

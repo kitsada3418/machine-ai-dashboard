@@ -3,7 +3,9 @@ require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
 const { setupMQTT, liveDataCache ,machineTrackers} = require('./mqttHandler');
+const { authenticateToken } = require('./authMiddleware');
 const userRoutes = require('./userRoutes'); // (สมมติว่าเซฟชื่อไฟล์ว่า userRoutes.js)
 
 
@@ -13,10 +15,13 @@ const app = express();
 
 app.set('pool', pool);
 
-app.use(cors());
+app.use(helmet());
+const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173').split(',').map(s => s.trim());
+app.use(cors({ origin: allowedOrigins }));
 app.use(express.json());
 
 app.use('/api', userRoutes);
+app.use('/api', authenticateToken);
 // เก็บ Cache แยกตาม Mh_ID
 let machineCache = {};
 
@@ -78,7 +83,7 @@ async function getDatadayTime(mhId,jobId)
     }
 }
 
-app.get('/api/data_live',async (req, res) => {
+app.get('/api/data_live', async (req, res) => {
    try {
         // ตรวจสอบว่ามีข้อมูลใน cache ไหม
         if (liveDataCache && Object.keys(liveDataCache).length > 0) {
@@ -129,20 +134,27 @@ app.get('/api/production/selectData', async (req, res) => {
                     `;
         }
         if (empId_All === 'true') {
+            if (query) query += ` UNION `;
             query += `  SELECT Emp_ID
                         from Emp
                         ORDER BY Emp_ID ASC
                     `;
         }
         if (mh_count === 'true') {
+            if (query) query += ` UNION `;
             query += `  SELECT COUNT(DISTINCT Mh_ID) AS mh_count
                         from Machine
                     `;
         }
         if (emp_count === 'true') {
+            if (query) query += ` UNION `;
             query += `  SELECT COUNT(DISTINCT Emp_ID) AS emp_count
                         from Emp
                     `;
+        }
+
+        if (!query) {
+            return res.status(400).json({ message: 'ต้องระบุเงื่อนไขการ query อย่างน้อยหนึ่งรายการ' });
         }
 
         const [rows] = await pool.query(query);
@@ -199,9 +211,7 @@ app.get('/api/datalog', async (req, res) => {
             params.push(empId);
         }
         if (date) {
-            year = date.split('-')[0]; // ดึงปีจากวันที่
-            month = date.split('-')[1]; // ดึงเดือนจากวันที่
-            day = date.split('-')[2]; // ดึงวันจากวันที่
+            const [year, month, day] = date.split('-');
             if (year && month && day) {
                 query += ` AND DATE_FORMAT(p.Start_Time, '%Y-%m-%d') = ?`;
                 params.push(date);
@@ -243,6 +253,10 @@ app.get('/api/production/filter', async (req, res) => {
         const { empId, mhId, daily, monthly, yearly, All_year,summary } = req.query;
         let query = ``;
         let params = [];
+
+        if (!daily && !monthly && !yearly && All_year !== 'true') {
+            return res.status(400).json({ message: 'ต้องระบุ daily, monthly, yearly หรือ All_year=true' });
+        }
 
        if (daily) {
             try {
@@ -515,13 +529,13 @@ app.get('/api/production/downtime', async (req, res) => {
         let query = '';
         let params = [];
 
-        
-
         let year = datetime ? datetime.split('-')[0] : null; // ดึงปีจากวันที่
         let month = datetime ? datetime.split('-')[1] : null; // ดึงเดือนจากวันที่
         let day = datetime ? datetime.split('-')[2] : null; // ดึงวันจากวันที่   
 
-        if (datetime) {
+        if (!datetime) {
+            return res.status(400).json({ message: 'ต้องระบุ datetime' });
+        }
             if (sum === 'true') {
                 query = `
                     SELECT 
@@ -575,8 +589,10 @@ app.get('/api/production/downtime', async (req, res) => {
             }
 
             query += ` ORDER BY Start_Time DESC`;
+        
 
-            
+        if (!query) {
+            return res.status(400).json({ message: 'เงื่อนไขไม่ถูกต้อง' });
         }
 
         const [rows] = await pool.query(query, params);
@@ -596,7 +612,7 @@ app.get('/api/production/downtime', async (req, res) => {
 // http://localhost:5000/api/production/downtime?datetime=2026-09  showe ข้อมูลการหยุดทำงานของเครื่องจักรทั้งหมดของเดือน 2026-09
 // http://localhost:5000/api/production/downtime?datetime=2026  showe ข้อมูลการหยุดทำงานของเครื่องจักรทั้งหมดของปี 2026
 
-const PORT = process.env.PORT;
+const PORT = process.env.PORT || 5000;
 //app.listen(PORT, async () => {
 //    console.log(`Node.js Server running on http://localhost:${PORT}`);
 app.listen(PORT, async () => {

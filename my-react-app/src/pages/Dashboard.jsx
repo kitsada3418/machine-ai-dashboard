@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import { apiFetch } from '../api';
 
 function Dashboard() {
   const [viewMode, setViewMode] = useState('table'); // 'grid' หรือ 'table'
@@ -6,25 +7,28 @@ function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
-  const [lastUpdate, setLastUpdate] = useState(new Date());
-
-  const fetchDashboardData = async () => {
-    try {
-      const response = await fetch('http://localhost:5000/api/data_live');
-      if (!response.ok) throw new Error('Network response was not ok');
-      const result = await response.json();
-      setDashboardData(result);
-      setLastUpdate(new Date());
-      setLoading(false);
-    } catch (error) {
-      console.error('Error fetching dashboard data:', error);
-    }
-  };
 
   useEffect(() => {
-    fetchDashboardData();
-    const interval = setInterval(fetchDashboardData, 1000);
-    return () => clearInterval(interval);
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const response = await apiFetch('/api/data_live');
+        if (!response.ok) throw new Error('Network response was not ok');
+        const result = await response.json();
+        if (!cancelled) {
+          setDashboardData(result);
+          setLoading(false);
+        }
+      } catch (error) {
+        console.error('Error fetching dashboard data:', error);
+      }
+    };
+    load();
+    const interval = setInterval(load, 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, []);
 
   const totalProduction = dashboardData?.total_day || 0;

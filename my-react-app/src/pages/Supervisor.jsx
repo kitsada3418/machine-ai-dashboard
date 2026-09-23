@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import { apiFetch } from '../api';
 
 function Supervisor() {
   // ================= STATE =================
@@ -18,7 +19,7 @@ function Supervisor() {
   // ================= FETCH LIVE DATA =================
   const fetchLiveStatus = async () => {
     try {
-      const response = await fetch('http://localhost:5000/api/data_live');
+      const response = await apiFetch('/api/data_live');
       if (!response.ok) throw new Error('Failed to fetch live data');
       
       const result = await response.json();
@@ -31,13 +32,29 @@ function Supervisor() {
     }
   };
 
-  // ดึงข้อมูลครั้งแรก และตั้งเวลาดึงข้อมูลใหม่ทุกๆ 15 วินาที (Auto-Refresh)
   useEffect(() => {
-    fetchLiveStatus();
-    const intervalId = setInterval(fetchLiveStatus, 15000); 
-    
-    // เคลียร์ Interval เมื่อเปลี่ยนไปหน้าอื่น
-    return () => clearInterval(intervalId);
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const response = await apiFetch('/api/data_live');
+        if (!response.ok) throw new Error('Failed to fetch live data');
+        const result = await response.json();
+        if (!cancelled) {
+          setLiveData(result);
+          setLastUpdate(new Date());
+        }
+      } catch (error) {
+        console.error('Error fetching live status:', error);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    load();
+    const intervalId = setInterval(load, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
   }, []);
 
   return (
