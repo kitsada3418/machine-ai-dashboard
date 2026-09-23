@@ -121,7 +121,7 @@ function Graphs() {
           return {
             name: displayName,
             totalQty: rawQty, // เก็บยอดเต็มไว้โชว์ใน Tooltip
-            qty: displayQty,  // ค่ายอดเฉลี่ยที่จะวาดบนกราฟ
+            qty: rawQty,  // ค่ายอดเฉลี่ยที่จะวาดบนกราฟ
             cycle: Number(item.cycle) || 0,
             activeCount: selectedTarget === 'all' ? activeCount : 1
           };

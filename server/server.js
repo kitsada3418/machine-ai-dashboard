@@ -17,8 +17,8 @@ app.use(cors());
 app.use(express.json());
 
 app.use('/api', userRoutes);
-// เก็บ Cache แยกตาม Mh_ID
-let machineCache = {};
+
+
 
 async function getMasterDataSummary(mhId_All, empId_All, mh_count, emp_count) {
     try {
@@ -48,62 +48,141 @@ async function getMasterDataSummary(mhId_All, empId_All, mh_count, emp_count) {
     }
 }
 
-async function getDatadayTime(mhId,jobId) 
-{
-    if (machineCache[mhId]) {
+let machineCache = {};
+let cachedMachineList = [];
+
+function scheduleMidnightReset() {
+    const now = new Date();
+    // คำนวณเวลาเที่ยงคืนของวันถัดไป (00:00:00)
+    const night = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate() + 1, 
+        0, 0, 0
+    );
+    const timeToMidnight = night.getTime() - now.getTime();
+
+    // ตั้งเวลาให้ทำงานเมื่อถึงเที่ยงคืน
+    setTimeout(() => {
+        machineCache = {};       // เคลียร์แคชข้อมูลการผลิต
+        cachedMachineList = [];  // เคลียร์แคชรายชื่อเครื่องจักร (เพื่อให้ดึง Master ใหม่ของวันใหม่ถ้าจำเป็น)
+        
+        console.log('🔄 [Midnight Reset] ล้างข้อมูล machineCache และ cachedMachineList ประจำวันใหม่เรียบร้อยแล้ว');
+        
+        // วนลูปตั้งเวลารอเที่ยงคืนของวันถัดไปต่อทันที
+        scheduleMidnightReset(); 
+    }, timeToMidnight);
+}
+
+
+async function getDatadayTime(mhId, jobId) {
+    // ถ้ามี Job ชัดเจน และตรงกับ Cache ให้ใช้ Cache ได้
+    if (jobId !== null && jobId !== undefined && machineCache[mhId]) {
         if (machineCache[mhId].jobId === jobId) {
-        return machineCache[mhId].total_ok; // คืนค่าจาก cache ถ้า jobId ตรงกัน
+            return machineCache[mhId].total_ok;
         }
     }
+
     try {
-    const query = `SELECT max(ok) as total_ok
-                  FROM production_sum
-                  WHERE Mh_ID = ?
-                  AND job_id != ?
-                  AND DATE(Log_Timestamp) = CURDATE()
-                  `;
-    const [rows] = await pool.query(query, [mhId, jobId]);
-    console.log(`cache miss for Mh_ID: ${mhId}, Job ID: ${jobId}. Fetched from DB: ${rows[0].total_ok || 0}`);
+        let query = '';
+        let queryParams = [];
 
-    // เก็บค่าใน cache
-    machineCache[mhId] = {
-        jobId: jobId,
-        total_ok: rows[0].total_ok || 0
-    }
+        // ถ้า jobId เป็น null หรือไม่มีค่า ให้ดึงค่า MAX(ok) ของเครื่องนี้ทั้งหมดในวันนี้เลย
+        if (jobId === null || jobId === undefined) {
+            query = `   SELECT SUM(max_ok_per_job) AS total_ok
+                        FROM (
+                           SELECT Mh_ID, job_id, MAX(ok) AS max_ok_per_job
+                            FROM production_sum
+                            WHERE Mh_ID = ? 
+                            AND DATE(Log_Timestamp) = CURDATE()
+                            GROUP BY Mh_ID, job_id
+                        ) AS subquery;`;
+   
+            queryParams = [mhId];
+        } else {
+            // ถ้ามี jobId ปกติ ถึงจะใช้เงื่อนไข != ได้
+            query = `SELECT max(ok) as total_ok
+                     FROM production_sum
+                     WHERE Mh_ID = ?
+                     AND job_id != ?
+                     AND DATE(Log_Timestamp) = CURDATE()`;
+            queryParams = [mhId, jobId];
+        }
 
-    return rows[0].total_ok || 0; // ถ้าไม่มีค่า ให้คืนค่าเป็น 0
+        const [rows] = await pool.query(query, queryParams);
+       // console.log(`Cache miss for Mh_ID: ${mhId}, Job ID: ${jobId}. Fetched from DB: ${rows[0].total_ok || 0}`);
+
+        // บันทึก Cache เฉพาะตอนมี Job ปกติ
+        if (jobId !== null && jobId !== undefined) {
+            machineCache[mhId] = {
+                jobId: jobId,
+                total_ok: rows[0].total_ok || 0
+            };
+        }
+
+        return rows[0].total_ok || 0; 
     } catch (error) {
         console.error(`Error fetching data for Mh_ID: ${mhId}, Job ID: ${jobId}`, error);
-        return 0; // ถ้ามีข้อผิดพลาด ให้คืนค่าเป็น 0
+        return 0; 
     }
 }
 
-app.get('/api/data_live',async (req, res) => {
-   try {
-        // ตรวจสอบว่ามีข้อมูลใน cache ไหม
+app.get('/api/data_live', async (req, res) => {
+    try {
+        // 1. ถ้า cache รายชื่อเครื่องว่าง ให้ดึงข้อมูลจากฐานข้อมูล
+        if (!cachedMachineList.mhList || cachedMachineList.mhList.length === 0) {
+            cachedMachineList = await getMasterDataSummary('true', 'false', 'false', 'false');
+        }
+
+        // 2. ตรวจสอบเครื่องจักรที่ไม่ได้ส่งข้อมูลมาที่ liveDataCache (ทำนอกลูป รอบเดียวพอ)
+        let offlineMachineIds = [];
+        if (cachedMachineList && cachedMachineList.mhList) {
+            offlineMachineIds = cachedMachineList.mhList.filter(mhId => !liveDataCache[mhId]);
+        }
+
+       // console.log(`Offline Machines: ${offlineMachineIds}`);
+      //  console.log(`Live Data Cache:`, liveDataCache);
+
+        // 3. ถ้ามีข้อมูลใน liveDataCache ให้วนลูปอัปเดตเครื่องที่ออนไลน์อยู่
         if (liveDataCache && Object.keys(liveDataCache).length > 0) {
-        // วนลูปเช็คหรือแก้ไขข้อมูลภายในลูปนี้เท่านั้น
             for (const [mhId, machineData] of Object.entries(liveDataCache)) {
-                // ดึงข้อมูลจากฐานข้อมูล
+                // ข้ามเครื่องที่เป็น OFFLINE ไปก่อน (เดี๋ยวไปจัดการทีเดียวข้างล่าง)
+                if (machineData.status === 'OFFLINE') continue; 
+
                 const pastOk = await getDatadayTime(mhId, machineData.job_id);
                 machineData.total_day = Number(pastOk) + Number(machineData.ok || 0);
-                //machineData.status = (machineData[mhId]?.job_id?.length || 0) > 0 ? 'RUN' : 'STOP';
             }
         }
 
+        // 4. ถ้ามีเครื่องจักรที่ออฟไลน์ ให้เพิ่ม/อัปเดตสถานะเข้าไปใน liveDataCache
+        if (offlineMachineIds.length > 0) {
+            for (const mhId of offlineMachineIds) {
+                // ใช้ await เพื่อรอรับค่าตัวเลขจริงๆ จาก DB (ไม่ใช่ Promise object)
+                const pastOk = await getDatadayTime(mhId, null);
+                console.log(`Offline Machine: ${mhId}, Past OK: ${pastOk}`);
+
+                liveDataCache[mhId] = {
+                    status: 'OFFLINE',
+                    total_ok: pastOk,
+                    total_day: pastOk // ยอดสะสมของเครื่องที่ออฟไลน์ไปแล้ว
+                };
+            }
+        }
+
+        // 5. คำนวณยอดรวมทั้งหมดของโรงงาน
         const sumTotalDay = Object.values(liveDataCache).reduce((acc, item) => {
-            return acc + (item.total_day || 0);
+            return Number(acc) + (Number(item.total_day) || 0);
         }, 0);
 
-        const masterSummary = await getMasterDataSummary('true', 'false', 'true', 'false');
 
-        // ส่งข้อมูลทั้งหมดกลับไป
+        // 6. ส่งข้อมูลทั้งหมดกลับไป
         res.json({
-            mh_count: masterSummary?.mhCount || 0,
-            mh_list: masterSummary?.mhList || [], // เพิ่มรายชื่อเครื่องทั้งหมดตรงนี้
-            mh_online: Object.values(liveDataCache).length,
+            mh_count: cachedMachineList.mhCount || 0,
+            mh_list: cachedMachineList.mhList || [],
+            mh_online: Object.values(liveDataCache).filter(item => item.status !== 'OFFLINE').length,
             mh_run: Object.values(liveDataCache).filter(item => item.status === 'RUN').length,
             mh_stop: Object.values(liveDataCache).filter(item => item.status === 'STOP').length,
+            mh_offline: Object.values(liveDataCache).filter(item => item.status === 'OFFLINE').length,
             total_day: sumTotalDay,
             data: liveDataCache
         });
@@ -463,7 +542,7 @@ app.get('/api/production/filter', async (req, res) => {
     }
 });
 // ดึงข้อมูลการผลิตตามเงื่อนไขที่กำหนด (รายชั่วโมง, รายวัน, รายเดือน, รายปี)
-// ดึงข้อมมูลรายชั่วโมง  http://localhost:5000/api/production/filter?&daily=2026-09-14
+// ดึงข้อมมูลรายชั่วโมง  http://localhost:5000/api/production/filter?&daily=2026-09-23
 // ดึงข้อมูลรายวัน      http://localhost:5000/api/production/filter?mhId=PU-42&monthly=2026-09
 // ดึงข้อมูลรายเดือน    http://localhost:5000/api/production/filter?&mhId=PU-42&yearly=2026
 // ดึงข้อมูลรายปี       http://localhost:5000/api/production/filter?&mhId=PU-42&All_year=true
@@ -506,8 +585,10 @@ app.get('/api/production/targets', async (req, res) => {
     }
 });
 
-//ถ้าอยากดึงข้อมูลทั้งหมดโดยไม่ระบุเงื่อนไขใด ๆ สามารถเรียก API ได้ดังนี้:
-// ดึงข้อมูลทั้งหมด   http://localhost:5000/api/production/filter?All_year=true
+// ดึงรายชื่อเป้าหมาย (Machine หรือ Employee) ที่มีข้อมูลตามช่วงเวลา
+// http://localhost:5000/api/production/targets?viewMode=machine&daily=2026-09-23  showe รายชื่อเครื่องจักรที่มีข้อมูลของวันที่ 2026-09-23
+// http://localhost:5000/api/production/targets?viewMode=employee&monthly=2026-09  showe รายชื่อพนักงานที่มีข้อมูลของเดือน 2026-09
+// http://localhost:5000/api/production/targets?viewMode=machine&yearly=2026  showe รายชื่อเครื่องจักรที่มีข้อมูลของปี 2026
 
 app.get('/api/production/downtime', async (req, res) => {
     try {
@@ -601,5 +682,6 @@ const PORT = process.env.PORT;
 //    console.log(`Node.js Server running on http://localhost:${PORT}`);
 app.listen(PORT, async () => {
     console.log(`Node.js Server running on http://localhost:${PORT}`);
+    scheduleMidnightReset();
     setupMQTT();
 });
