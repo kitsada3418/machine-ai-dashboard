@@ -1,184 +1,323 @@
 // โหลดค่าจากไฟล์ .env ไว้บรรทัดแรกสุด
-require('dotenv').config();
+require("dotenv").config();
 
-const express = require('express');
-const cors = require('cors');
-const helmet = require('helmet');
-const { setupMQTT, liveDataCache ,machineTrackers} = require('./mqttHandler');
-const { authenticateToken } = require('./authMiddleware');
-const userRoutes = require('./userRoutes'); // (สมมติว่าเซฟชื่อไฟล์ว่า userRoutes.js)
+const express = require("express");
+const cors = require("cors");
+const helmet = require("helmet");
+const { setupMQTT, liveDataCache, machineTrackers } = require("./mqttHandler");
+const { authenticateToken } = require("./authMiddleware");
+const userRoutes = require("./userRoutes"); // (สมมติว่าเซฟชื่อไฟล์ว่า userRoutes.js)
 
-
-const pool = require('./db');
+const pool = require("./db");
 const app = express();
 
-
-app.set('pool', pool);
+app.set("pool", pool);
 
 app.use(helmet());
-const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173').split(',').map(s => s.trim());
+const allowedOrigins = (process.env.CORS_ORIGINS || "http://localhost:5173")
+  .split(",")
+  .map((s) => s.trim());
 app.use(cors({ origin: allowedOrigins }));
 app.use(express.json());
 
-app.use('/api', userRoutes);
-app.use('/api', authenticateToken);
+app.use("/api", userRoutes);
+app.use("/api", authenticateToken);
 // เก็บ Cache แยกตาม Mh_ID
-let machineCache = {};
+
+function scheduleMidnightReset() {
+  const now = new Date();
+  // คำนวณเวลาเที่ยงคืนของวันถัดไป (00:00:00)
+  const night = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() + 1,
+    0,
+    0,
+    0,
+  );
+  const timeToMidnight = night.getTime() - now.getTime();
+
+  // ตั้งเวลาให้ทำงานเมื่อถึงเที่ยงคืน
+  setTimeout(() => {
+    machineCache = {}; // เคลียร์แคชข้อมูลการผลิต
+    cachedMachineList = []; // เคลียร์แคชรายชื่อเครื่องจักร (เพื่อให้ดึง Master ใหม่ของวันใหม่ถ้าจำเป็น)
+
+    console.log(
+      "🔄 [Midnight Reset] ล้างข้อมูล machineCache และ cachedMachineList ประจำวันใหม่เรียบร้อยแล้ว",
+    );
+
+    // วนลูปตั้งเวลารอเที่ยงคืนของวันถัดไปต่อทันที
+    scheduleMidnightReset();
+  }, timeToMidnight);
+}
 
 async function getMasterDataSummary(mhId_All, empId_All, mh_count, emp_count) {
-    try {
-        let results = {};
+  try {
+    let results = {};
 
-        if (mhId_All === 'true') {
-            const [rows] = await pool.query(`SELECT Mh_ID FROM Machine ORDER BY Mh_ID ASC`);
-            results.mhList = rows.map(row => row.Mh_ID); // ดึงเฉพาะค่า Mh_ID ออกมาเป็น Array ของชื่อเครื่อง
-        }
-        if (empId_All === 'true') {
-            const [rows] = await pool.query(`SELECT Emp_ID FROM Emp ORDER BY Emp_ID ASC`);
-            results.empList = rows.map(row => row.Emp_ID);
-        }
-        if (mh_count === 'true') {
-            const [rows] = await pool.query(`SELECT COUNT(DISTINCT Mh_ID) AS mh_count FROM Machine`);
-            results.mhCount = rows[0].mh_count;
-        }
-        if (emp_count === 'true') {
-            const [rows] = await pool.query(`SELECT COUNT(DISTINCT Emp_ID) AS emp_count FROM Emp`);
-            results.empCount = rows[0].emp_count;
-        }
-
-        return results;
-    } catch (err) {
-        console.error('Database Query Error:', err);
-        return null;
+    if (mhId_All === "true") {
+      const [rows] = await pool.query(
+        `SELECT Mh_ID FROM Machine ORDER BY Mh_ID ASC`,
+      );
+      results.mhList = rows.map((row) => row.Mh_ID); // ดึงเฉพาะค่า Mh_ID ออกมาเป็น Array ของชื่อเครื่อง
     }
+    if (empId_All === "true") {
+      const [rows] = await pool.query(
+        `SELECT Emp_ID FROM Emp ORDER BY Emp_ID ASC`,
+      );
+      results.empList = rows.map((row) => row.Emp_ID);
+    }
+    if (mh_count === "true") {
+      const [rows] = await pool.query(
+        `SELECT COUNT(DISTINCT Mh_ID) AS mh_count FROM Machine`,
+      );
+      results.mhCount = rows[0].mh_count;
+    }
+    if (emp_count === "true") {
+      const [rows] = await pool.query(
+        `SELECT COUNT(DISTINCT Emp_ID) AS emp_count FROM Emp`,
+      );
+      results.empCount = rows[0].emp_count;
+    }
+
+    return results;
+  } catch (err) {
+    console.error("Database Query Error:", err);
+    return null;
+  }
 }
 
-async function getDatadayTime(mhId,jobId) 
-{
-    if (machineCache[mhId]) {
-        if (machineCache[mhId].jobId === jobId) {
-        return machineCache[mhId].total_ok; // คืนค่าจาก cache ถ้า jobId ตรงกัน
-        }
-    }
-    try {
-    const query = `SELECT max(ok) as total_ok
-                  FROM production_sum
-                  WHERE Mh_ID = ?
-                  AND job_id != ?
-                  AND DATE(Log_Timestamp) = CURDATE()
-                  `;
-    const [rows] = await pool.query(query, [mhId, jobId]);
-    console.log(`cache miss for Mh_ID: ${mhId}, Job ID: ${jobId}. Fetched from DB: ${rows[0].total_ok || 0}`);
+let machineCache = {};
+let cachedMachineList = [];
 
-    // เก็บค่าใน cache
-    machineCache[mhId] = {
+async function getDatadayTime(mhId, jobId) {
+  // ถ้ามี Job ชัดเจน และตรงกับ Cache ให้ใช้ Cache ได้
+  if ((jobId !== null && jobId !== undefined && machineCache[mhId]) || jobId === '-offline-') {
+    if (machineCache[mhId].jobId === jobId) {
+     console.log(`do not fetch from DB, use cache for Mh_ID: ${mhId}, Job ID: ${jobId}`);
+      return machineCache[mhId].total_ok;
+    }
+  }
+  try {
+    let query = "";
+    let queryParams = [];
+    // ถ้า jobId เป็น null หรือไม่มีค่า ให้ดึงค่า MAX(ok) ของเครื่องนี้ทั้งหมดในวันนี้เลย
+    if (jobId === null || jobId === undefined) {
+      query = `   SELECT SUM(max_ok_per_job) AS total_ok
+                        FROM (
+                            SELECT Mh_ID, job_id, MAX(ok) AS max_ok_per_job
+                            FROM production_sum
+                            WHERE Mh_ID = ?
+                            AND Log_Timestamp >= CURDATE()
+                            GROUP BY Mh_ID, job_id
+                        ) AS subquery;`;
+
+      queryParams = [mhId];
+
+    } else {
+      // ถ้ามี jobId ปกติ ถึงจะใช้เงื่อนไข != ได้
+
+      query = `SELECT max(ok) as total_ok
+                     FROM production_sum
+                     WHERE Mh_ID = ?
+                     AND job_id != ?
+                     AND Log_Timestamp >= CURDATE()`;
+
+      queryParams = [mhId, jobId];
+    }
+
+    const [rows] = await pool.query(query, queryParams);
+
+//    console.log(
+//      `Cache miss for Mh_ID: ${mhId}, Job ID: ${jobId}. Fetched from DB: ${rows[0].total_ok || 0}`,
+//    );
+
+    // บันทึก Cache เฉพาะตอนมี Job ปกติ
+
+    if (jobId !== null && jobId !== undefined) {
+      machineCache[mhId] = {
         jobId: jobId,
-        total_ok: rows[0].total_ok || 0
+        total_ok: rows[0].total_ok || 0,
+      };
+    }
+    else if (jobId === null || jobId === undefined) {
+      machineCache[mhId] = {
+        jobId: '-offline-', // ใช้ค่าเฉพาะเพื่อบ่งบอกว่าเป็น Offline หรือไม่มี Job
+        total_ok: rows[0].total_ok || 0,
+      };
     }
 
-    return rows[0].total_ok || 0; // ถ้าไม่มีค่า ให้คืนค่าเป็น 0
-    } catch (error) {
-        console.error(`Error fetching data for Mh_ID: ${mhId}, Job ID: ${jobId}`, error);
-        return 0; // ถ้ามีข้อผิดพลาด ให้คืนค่าเป็น 0
-    }
+    console.log(`Cached data for Mh_ID: ${mhId}, Job ID: ${jobId}:`, machineCache[mhId]);
+
+    return rows[0].total_ok || 0;
+  } catch (error) {
+    console.error(
+      `Error fetching data for Mh_ID: ${mhId}, Job ID: ${jobId}`,
+      error,
+    );
+
+    return 0;
+  }
 }
 
-app.get('/api/data_live', async (req, res) => {
-   try {
-        // ตรวจสอบว่ามีข้อมูลใน cache ไหม
-        if (liveDataCache && Object.keys(liveDataCache).length > 0) {
-        // วนลูปเช็คหรือแก้ไขข้อมูลภายในลูปนี้เท่านั้น
-            for (const [mhId, machineData] of Object.entries(liveDataCache)) {
-                // ดึงข้อมูลจากฐานข้อมูล
-                const pastOk = await getDatadayTime(mhId, machineData.job_id);
-                machineData.total_day = Number(pastOk) + Number(machineData.ok || 0);
-                //machineData.status = (machineData[mhId]?.job_id?.length || 0) > 0 ? 'RUN' : 'STOP';
-            }
-        }
+app.get("/api/data_live", async (req, res) => {
+  try {
+    // 1. ถ้า cache รายชื่อเครื่องว่าง ให้ดึงข้อมูลจากฐานข้อมูล
 
-        const sumTotalDay = Object.values(liveDataCache).reduce((acc, item) => {
-            return acc + (item.total_day || 0);
-        }, 0);
-
-        const masterSummary = await getMasterDataSummary('true', 'false', 'true', 'false');
-
-        // ส่งข้อมูลทั้งหมดกลับไป
-        res.json({
-            mh_count: masterSummary?.mhCount || 0,
-            mh_list: masterSummary?.mhList || [], // เพิ่มรายชื่อเครื่องทั้งหมดตรงนี้
-            mh_online: Object.values(liveDataCache).length,
-            mh_run: Object.values(liveDataCache).filter(item => item.status === 'RUN').length,
-            mh_stop: Object.values(liveDataCache).filter(item => item.status === 'STOP').length,
-            total_day: sumTotalDay,
-            data: liveDataCache
-        });
-
-    } catch (err) {
-        console.error(err);
-        res.status(500).send('Server Error');
+    if (!cachedMachineList.mhList || cachedMachineList.mhList.length === 0) {
+      cachedMachineList = await getMasterDataSummary(
+        "true",
+        "false",
+        "true",
+        "false",
+      );
     }
+    // 2. ตรวจสอบเครื่องจักรที่ไม่ได้ส่งข้อมูลมาที่ liveDataCache (ทำนอกลูป รอบเดียวพอ)
+
+    let offlineMachineIds = [];
+
+    if (cachedMachineList && cachedMachineList.mhList) {
+      offlineMachineIds = cachedMachineList.mhList.filter(
+        (mhId) => !liveDataCache[mhId],
+      );
+    }
+
+    // 3. ถ้ามีข้อมูลใน liveDataCache ให้วนลูปอัปเดตเครื่องที่ออนไลน์อยู่
+
+    if (liveDataCache && Object.keys(liveDataCache).length > 0) {
+      for (const [mhId, machineData] of Object.entries(liveDataCache)) {
+        // ข้ามเครื่องที่เป็น OFFLINE ไปก่อน (เดี๋ยวไปจัดการทีเดียวข้างล่าง)
+
+        if (machineData.status === "OFFLINE" ) continue;
+
+        const pastOk = await getDatadayTime(mhId, machineData.job_id);
+        machineData.total_day = Number(pastOk) + Number(machineData.ok || 0);
+        machineData.alarm = machineTrackers[mhId].isDown 
+    ? Math.floor((Date.now() - machineTrackers[mhId].lastChangeStart) / 1000) 
+    : 0;
+      }
+    }
+    // 4. ถ้ามีเครื่องจักรที่ออฟไลน์ ให้เพิ่ม/อัปเดตสถานะเข้าไปใน liveDataCache
+
+    if (offlineMachineIds.length > 0) {
+      for (const mhId of offlineMachineIds) {
+        // ใช้ await เพื่อรอรับค่าตัวเลขจริงๆ จาก DB (ไม่ใช่ Promise object)
+        if (machineCache[mhId] && machineCache[mhId].job_id  !== undefined)  continue; // ข้ามเครื่องที่มี Job ID อยู่แล้ว (ไม่ใช่เครื่องออฟไลน์จริงๆ)
+
+        const pastOk = await getDatadayTime(mhId, undefined);
+
+        console.log(`Offline Machine: ${mhId}, Past OK: ${pastOk}`);
+        liveDataCache[mhId] = {
+          status: "OFFLINE", // กำหนดสถานะเป็น RUN สำหรับเครื่องที่ออฟไลน์ (เพื่อให้แสดงใน Dashboard)
+          total_ok: pastOk,
+          total_day: pastOk, // ยอดสะสมของเครื่องที่ออฟไลน์ไปแล้ว
+        };
+    }
+    }
+
+    // 5. คำนวณยอดรวมทั้งหมดของโรงงาน
+
+    const sumTotalDay = Object.values(liveDataCache).reduce((acc, item) => {
+      return Number(acc) + (Number(item.total_day) || 0);
+    }, 0);
+
+    //console.log(`Total Day Sum: ${sumTotalDay}`);
+
+    // 6. ส่งข้อมูลทั้งหมดกลับไป
+
+    res.json({
+      mh_count: cachedMachineList.mhCount || 0,
+
+      mh_list: cachedMachineList.mhList || [],
+
+      mh_online: Object.values(liveDataCache).filter(
+        (item) => item.status !== "OFFLINE",
+      ).length,
+
+      mh_run: Object.values(liveDataCache).filter(
+        (item) => item.status === "RUN",
+      ).length,
+
+      mh_stop: Object.values(liveDataCache).filter(
+        (item) => item.status === "STOP",
+      ).length,
+
+      mh_offline: Object.values(liveDataCache).filter(
+        (item) => item.status === "OFFLINE",
+      ).length,
+
+      total_day: sumTotalDay,
+      data: liveDataCache,
+    });
+  } catch (err) {
+    console.error(err);
+
+    res.status(500).send("Server Error");
+  }
 });
+
 //ดึงข้อมูลการผลิตแบบ Real-time จาก MQTT Broker
+
 // http://localhost:5000/api/data_live
 
+app.get("/api/production/selectData", async (req, res) => {
+  try {
+    const { mhId_All, empId_All, mh_count, emp_count } = req.query;
+    let query = "";
 
-app.get('/api/production/selectData', async (req, res) => {
-    try {
-        const {mhId_All,empId_All,mh_count,emp_count} = req.query;
-        let query = '';
-
-        if (mhId_All === 'true') {
-            query += `  SELECT Mh_ID
+    if (mhId_All === "true") {
+      query += `  SELECT Mh_ID
                         from Machine
                         ORDER BY Mh_ID ASC
                     `;
-        }
-        if (empId_All === 'true') {
-            if (query) query += ` UNION `;
-            query += `  SELECT Emp_ID
+    }
+    if (empId_All === "true") {
+      if (query) query += ` UNION `;
+      query += `  SELECT Emp_ID
                         from Emp
                         ORDER BY Emp_ID ASC
                     `;
-        }
-        if (mh_count === 'true') {
-            if (query) query += ` UNION `;
-            query += `  SELECT COUNT(DISTINCT Mh_ID) AS mh_count
+    }
+    if (mh_count === "true") {
+      if (query) query += ` UNION `;
+      query += `  SELECT COUNT(DISTINCT Mh_ID) AS mh_count
                         from Machine
                     `;
-        }
-        if (emp_count === 'true') {
-            if (query) query += ` UNION `;
-            query += `  SELECT COUNT(DISTINCT Emp_ID) AS emp_count
+    }
+    if (emp_count === "true") {
+      if (query) query += ` UNION `;
+      query += `  SELECT COUNT(DISTINCT Emp_ID) AS emp_count
                         from Emp
                     `;
-        }
-
-        if (!query) {
-            return res.status(400).json({ message: 'ต้องระบุเงื่อนไขการ query อย่างน้อยหนึ่งรายการ' });
-        }
-
-        const [rows] = await pool.query(query);
-        res.json(rows);
-    } catch (err) {
-        console.error(err);
-        res.status(500).send('Server Error');
     }
+
+    if (!query) {
+      return res
+        .status(400)
+        .json({ message: "ต้องระบุเงื่อนไขการ query อย่างน้อยหนึ่งรายการ" });
+    }
+
+    const [rows] = await pool.query(query);
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Server Error");
+  }
 });
 
-// วิธีการดึงข้อมูลการผลิตของเครื่องจักรตาม Mh_ID โดยเรียงลำดับจากเวลาที่เริ่มต้นล่าสุดไปยังเก่าสุด  
+// วิธีการดึงข้อมูลการผลิตของเครื่องจักรตาม Mh_ID โดยเรียงลำดับจากเวลาที่เริ่มต้นล่าสุดไปยังเก่าสุด
 // http://localhost:5000/api/production/selectData?mhId_All=true   showe รายชื่อเครื่องจักรทั้งหมด
 // http://localhost:5000/api/production/selectData?empId_All=true  showe รายชื่อพนักงานทั้งหมด
 // http://localhost:5000/api/production/selectData?mh_count=true   showe จำนวนเครื่องจักรทั้งหมด
 // http://localhost:5000/api/production/selectData?emp_count=true  showe จำนวนพนักงานทั้งหมด
 
-
 // ดึงข้อมูลการผลิตของเครื่องจักรตาม Mh_ID
 
-app.get('/api/datalog', async (req, res) => {
-    try {
-        const { mhId,empId,date,jobId } = req.query;
+app.get("/api/datalog", async (req, res) => {
+  try {
+    const { mhId, empId, date, jobId } = req.query;
 
-        let query =    `SELECT 
+    let query = `SELECT 
                             p.Start_Time,
                             job_id,
                             p.Mh_ID,
@@ -200,43 +339,41 @@ app.get('/api/datalog', async (req, res) => {
                         JOIN status s 
                         ON p.status = s.status_id 
                         WHERE 1=1`;
-        let params = [];
+    let params = [];
 
-        if (mhId) {
-            query += ` AND p.Mh_ID = ?`;
-            params.push(mhId);
-        }
-        if (empId) {
-            query += ` AND p.Emp_ID = ?`;
-            params.push(empId);
-        }
-        if (date) {
-            const [year, month, day] = date.split('-');
-            if (year && month && day) {
-                query += ` AND DATE_FORMAT(p.Start_Time, '%Y-%m-%d') = ?`;
-                params.push(date);
-            }
-            else if (year && month) {
-                query += ` AND DATE_FORMAT(p.Start_Time, '%Y-%m') = ?`;
-                params.push(`${year}-${month}`);
-            }
-            else if (year) {
-                query += ` AND DATE_FORMAT(p.Start_Time, '%Y') = ?`;
-                params.push(year);
-            }
-        }
-        if (jobId) {
-            query += ` AND p.job_id = ?`;
-            params.push(jobId);
-        }
-        query += `ORDER BY Start_Time DESC`;
-        
-        const [rows] = await pool.query(query, params);
-        res.json(rows);
-    } catch (err) {
-        console.error(err);
-        res.status(500).send('Server Error');
+    if (mhId) {
+      query += ` AND p.Mh_ID = ?`;
+      params.push(mhId);
     }
+    if (empId) {
+      query += ` AND p.Emp_ID = ?`;
+      params.push(empId);
+    }
+    if (date) {
+      const [year, month, day] = date.split("-");
+      if (year && month && day) {
+        query += ` AND DATE_FORMAT(p.Start_Time, '%Y-%m-%d') = ?`;
+        params.push(date);
+      } else if (year && month) {
+        query += ` AND DATE_FORMAT(p.Start_Time, '%Y-%m') = ?`;
+        params.push(`${year}-${month}`);
+      } else if (year) {
+        query += ` AND DATE_FORMAT(p.Start_Time, '%Y') = ?`;
+        params.push(year);
+      }
+    }
+    if (jobId) {
+      query += ` AND p.job_id = ?`;
+      params.push(jobId);
+    }
+    query += `ORDER BY Start_Time DESC`;
+
+    const [rows] = await pool.query(query, params);
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Server Error");
+  }
 });
 // วิธีการดึงข้อมูลการผลิตของเครื่องจักรตาม Mh_ID โดยเรียงลำดับจากเวลาที่เริ่มต้นล่าสุดไปยังเก่าสุด
 // http://localhost:5000/api/datalog?mhId=PU-42   showe ข้อมูลการผลิตของเครื่องจักร PU-42
@@ -245,22 +382,24 @@ app.get('/api/datalog', async (req, res) => {
 // http://localhost:5000/api/datalog?jobId=GQ42690089-0000  showe ข้อมูลการผลิตของ Job ID GQ42690089-0000
 // http://localhost:5000/api/datalog?mhId=PU-42&date=2026-09  showe ข้อมูลการผลิตของเครื่องจักร PU-42 ของวันที่ 2026-09-14
 
-
 // ดึงข้อมูลการผลิตตามเงื่อนไขที่กำหนด (รายชั่วโมง, รายวัน, รายเดือน, รายปี)
 
-app.get('/api/production/filter', async (req, res) => {
-    try {
-        const { empId, mhId, daily, monthly, yearly, All_year,summary } = req.query;
-        let query = ``;
-        let params = [];
+app.get("/api/production/filter", async (req, res) => {
+  try {
+    const { empId, mhId, daily, monthly, yearly, All_year, summary } =
+      req.query;
+    let query = ``;
+    let params = [];
 
-        if (!daily && !monthly && !yearly && All_year !== 'true') {
-            return res.status(400).json({ message: 'ต้องระบุ daily, monthly, yearly หรือ All_year=true' });
-        }
+    if (!daily && !monthly && !yearly && All_year !== "true") {
+      return res.status(400).json({
+        message: "ต้องระบุ daily, monthly, yearly หรือ All_year=true",
+      });
+    }
 
-       if (daily) {
-            try {
-                query = `
+    if (daily) {
+      try {
+        query = `
                     SELECT 
                         DATE_FORMAT(p1.Log_Timestamp, '%H:00') AS hour,
                         SUM(
@@ -278,24 +417,29 @@ app.get('/api/production/filter', async (req, res) => {
                     FROM production_sum p1
                     WHERE 1=1
                 `;
-                
-                if (empId) { query += ` AND p1.Emp_ID = ?`; params.push(empId); }
-                if (mhId) { query += ` AND p1.Mh_ID = ?`; params.push(mhId); }
-                
-                query += `
+
+        if (empId) {
+          query += ` AND p1.Emp_ID = ?`;
+          params.push(empId);
+        }
+        if (mhId) {
+          query += ` AND p1.Mh_ID = ?`;
+          params.push(mhId);
+        }
+
+        query += `
                         AND DATE_FORMAT(p1.Log_Timestamp, '%Y-%m-%d') = ?
                     GROUP BY DATE_FORMAT(p1.Log_Timestamp, '%H:00')
                     ORDER BY hour;
                 `;
-                params.push(daily);
-            } catch (err) {
-                console.error('Error constructing daily query:', err);
-                return res.status(500).send('Server Error');
-            }
-        }
-        else if (monthly) {
-            try {
-                query = `
+        params.push(daily);
+      } catch (err) {
+        console.error("Error constructing daily query:", err);
+        return res.status(500).send("Server Error");
+      }
+    } else if (monthly) {
+      try {
+        query = `
                     SELECT 
                         DATE_FORMAT(p1.Log_Timestamp, '%Y-%m-%d') AS log_date,
                         SUM(
@@ -313,24 +457,29 @@ app.get('/api/production/filter', async (req, res) => {
                     FROM production_sum p1
                     WHERE 1=1
                 `;
-                
-                if (empId) { query += ` AND p1.Emp_ID = ?`; params.push(empId); }
-                if (mhId) { query += ` AND p1.Mh_ID = ?`; params.push(mhId); }
-                
-                query += `
+
+        if (empId) {
+          query += ` AND p1.Emp_ID = ?`;
+          params.push(empId);
+        }
+        if (mhId) {
+          query += ` AND p1.Mh_ID = ?`;
+          params.push(mhId);
+        }
+
+        query += `
                         AND DATE_FORMAT(p1.Log_Timestamp, '%Y-%m') = ?
                     GROUP BY DATE_FORMAT(p1.Log_Timestamp, '%Y-%m-%d')
                     ORDER BY log_date;
                 `;
-                params.push(monthly);
-            } catch (err) {
-                console.error('Error constructing monthly query:', err);
-                return res.status(500).send('Server Error');
-            }
-        }
-        else if (yearly) {
-            try {
-                query = `
+        params.push(monthly);
+      } catch (err) {
+        console.error("Error constructing monthly query:", err);
+        return res.status(500).send("Server Error");
+      }
+    } else if (yearly) {
+      try {
+        query = `
                     SELECT
                         DATE_FORMAT(p1.Log_Timestamp, '%Y-%m') AS log_month,
                         SUM(
@@ -348,133 +497,157 @@ app.get('/api/production/filter', async (req, res) => {
                     FROM production_sum p1
                     WHERE 1=1
                 `;
-                
-                if (empId) { query += ` AND p1.Emp_ID = ?`; params.push(empId); }
-                if (mhId) { query += ` AND p1.Mh_ID = ?`; params.push(mhId); }
-                
-                query += `
+
+        if (empId) {
+          query += ` AND p1.Emp_ID = ?`;
+          params.push(empId);
+        }
+        if (mhId) {
+          query += ` AND p1.Mh_ID = ?`;
+          params.push(mhId);
+        }
+
+        query += `
                         AND DATE_FORMAT(p1.Log_Timestamp, '%Y') = ?
                     GROUP BY DATE_FORMAT(p1.Log_Timestamp, '%Y-%m')
                     ORDER BY log_month;
                 `;
-                params.push(yearly);
-            } catch (err) {
-                console.error('Error constructing yearly query:', err);
-                return res.status(500).send('Server Error');
-            }
+        params.push(yearly);
+      } catch (err) {
+        console.error("Error constructing yearly query:", err);
+        return res.status(500).send("Server Error");
+      }
+    } else if (All_year === "true") {
+      // กำหนดคอลัมน์พื้นฐานที่จะใช้กรุ๊ปตามปี (ใช้ Subquery หา Delta เช่นเดียวกัน)
+      let selectColumns = [
+        "DATE_FORMAT(p1.Log_Timestamp, '%Y') AS log_year",
+        `SUM(GREATEST(0, p1.OK - COALESCE((SELECT p2.OK FROM production_sum p2 WHERE p2.Mh_ID = p1.Mh_ID AND p2.Job_ID = p1.Job_ID AND p2.Log_Timestamp < p1.Log_Timestamp ORDER BY p2.Log_Timestamp DESC LIMIT 1), 0))) AS ok`,
+      ];
+      let groupByColumns = ["DATE_FORMAT(p1.Log_Timestamp, '%Y')"];
+
+      try {
+        query = `SELECT `;
+
+        // ถ้ามีการส่ง mhId มา ให้เพิ่มเข้าไปใน SELECT และ GROUP BY
+        if (mhId) {
+          selectColumns.unshift("p1.Mh_ID");
+          groupByColumns.unshift("p1.Mh_ID");
         }
-        else if (All_year === 'true') {
-            // กำหนดคอลัมน์พื้นฐานที่จะใช้กรุ๊ปตามปี (ใช้ Subquery หา Delta เช่นเดียวกัน)
-            let selectColumns = [
-                "DATE_FORMAT(p1.Log_Timestamp, '%Y') AS log_year", 
-                `SUM(GREATEST(0, p1.OK - COALESCE((SELECT p2.OK FROM production_sum p2 WHERE p2.Mh_ID = p1.Mh_ID AND p2.Job_ID = p1.Job_ID AND p2.Log_Timestamp < p1.Log_Timestamp ORDER BY p2.Log_Timestamp DESC LIMIT 1), 0))) AS ok`
-            ];
-            let groupByColumns = ["DATE_FORMAT(p1.Log_Timestamp, '%Y')"];
-            
-            try {
-                query = `SELECT `;
 
-                // ถ้ามีการส่ง mhId มา ให้เพิ่มเข้าไปใน SELECT และ GROUP BY
-                if (mhId) {
-                    selectColumns.unshift('p1.Mh_ID');
-                    groupByColumns.unshift('p1.Mh_ID');
-                }
+        // ถ้ามีการส่ง empId มา ให้เพิ่มเข้าไปใน SELECT และ GROUP BY
+        if (empId) {
+          selectColumns.unshift("p1.Emp_ID");
+          groupByColumns.unshift("p1.Emp_ID");
+        }
 
-                // ถ้ามีการส่ง empId มา ให้เพิ่มเข้าไปใน SELECT และ GROUP BY
-                if (empId) {
-                    selectColumns.unshift('p1.Emp_ID');
-                    groupByColumns.unshift('p1.Emp_ID');
-                }
+        query += selectColumns.join(", ") + ` FROM production_sum p1 WHERE 1=1`;
 
-                query += selectColumns.join(', ') + ` FROM production_sum p1 WHERE 1=1`;
+        // ใส่เงื่อนไข WHERE
+        if (empId) {
+          query += ` AND p1.Emp_ID = ?`;
+          params.push(empId);
+        }
+        if (mhId) {
+          query += ` AND p1.Mh_ID = ?`;
+          params.push(mhId);
+        }
 
-                // ใส่เงื่อนไข WHERE
-                if (empId) { 
-                    query += ` AND p1.Emp_ID = ?`; 
-                    params.push(empId); 
-                }
-                if (mhId) { 
-                    query += ` AND p1.Mh_ID = ?`; 
-                    params.push(mhId); 
-                }
-
-                // ปิดท้ายด้วย GROUP BY ตามคอลัมน์ที่มี
-                query += `
-                    GROUP BY ${groupByColumns.join(', ')}
+        // ปิดท้ายด้วย GROUP BY ตามคอลัมน์ที่มี
+        query += `
+                    GROUP BY ${groupByColumns.join(", ")}
                     ORDER BY log_year;
                 `;
-            } catch (err) {
-                console.error('Error constructing All_year query:', err);
-                return res.status(500).send('Server Error');
-            }
-        }
-    
-        const [rows] = await pool.query(query, params);
-        const dataMap = {}; 
-        let completeData = []; // เปลี่ยนจาก const เป็น let
-
-        // สร้างชุดข้อมูลสำหรับเติมเต็ม (Default Arrays)
-        const allHours = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0') + ':00');
-
-        // จัดการดึงปี/เดือนสำหรับสร้าง Array วันหรือเดือน
-        const targetDate = daily || monthly || new Date().toISOString().slice(0, 7);
-        const [yearStr, monthStr] = targetDate.split('-');
-        const yearNum = parseInt(yearStr) || new Date().getFullYear();
-        const monthNum = parseInt(monthStr) || 1;
-
-        const daysInMonth = new Date(yearNum, monthNum, 0).getDate();
-        const allDays = Array.from({ length: daysInMonth }, (_, i) => {
-            const day = String(i + 1).padStart(2, '0');
-            return `${yearStr}-${monthStr}-${day}`;
-        });
-
-        const allMonths = Array.from({ length: 12 }, (_, i) => {
-            const month = String(i + 1).padStart(2, '0');
-            return `${yearStr}-${month}`;
-        });
-
-        //const currentYear = new Date().getFullYear();
-        //const allYears = Array.from({ length: 10 }, (_, i) => String(currentYear - i));
-
-        // แมพข้อมูลเข้ากับโครงสร้างหลัก
-        if (daily) {
-            rows.forEach(item => { dataMap[item.hour] = item.ok; });
-            completeData = allHours.map(hour => ({ hour, ok: dataMap[hour] || '0' }));
-        }
-        else if (monthly) {
-            rows.forEach(item => { dataMap[item.log_date] = item.ok; });
-            completeData = allDays.map(day => ({ log_date: day, ok: dataMap[day] || '0' }));
-        }
-        else if (yearly) {
-            rows.forEach(item => { dataMap[item.log_month] = item.ok; });
-            completeData = allMonths.map(month => ({ log_month: month, ok: dataMap[month] || '0' }));
-        }
-        else if (All_year === 'true') {
-            // 1. หาปีที่เก่าที่สุดจากข้อมูลที่ดึงมา (ถ้าไม่มีข้อมูลเลย ให้ใช้ปีปัจจุบัน)
-            const years = rows.map(item => parseInt(item.log_year));
-            const minYear = years.length > 0 ? Math.min(...years) : new Date().getFullYear();
-            const currentYear = new Date().getFullYear(); // ปี 2026
-
-            // 2. สร้าง Array รายปีตั้งแต่ปีเก่าสุด จนถึงปีปัจจุบัน
-            const allYears = Array.from({ length: currentYear - minYear + 1 }, (_, i) => String(minYear + i));
-
-            // 3. นำข้อมูลดิบมาใส่ Object สำหรับค้นหา
-            rows.forEach(item => { 
-                dataMap[item.log_year] = item.ok; 
-            });
-
-            // 4. แมพข้อมูลให้ครบทุกปี ถ้าปีไหนไม่มีข้อมูลให้ใส่ '0'
-            completeData = allYears.map(year => ({ 
-                log_year: year, 
-                ok: dataMap[year] || '0' 
-            }));
-        }
-
-        res.json(completeData);
-    } catch (err) {
-        console.error(err);
-        res.status(500).send('Server Error');
+      } catch (err) {
+        console.error("Error constructing All_year query:", err);
+        return res.status(500).send("Server Error");
+      }
     }
+
+    const [rows] = await pool.query(query, params);
+    const dataMap = {};
+    let completeData = []; // เปลี่ยนจาก const เป็น let
+
+    // สร้างชุดข้อมูลสำหรับเติมเต็ม (Default Arrays)
+    const allHours = Array.from(
+      { length: 24 },
+      (_, i) => String(i).padStart(2, "0") + ":00",
+    );
+
+    // จัดการดึงปี/เดือนสำหรับสร้าง Array วันหรือเดือน
+    const targetDate = daily || monthly || new Date().toISOString().slice(0, 7);
+    const [yearStr, monthStr] = targetDate.split("-");
+    const yearNum = parseInt(yearStr) || new Date().getFullYear();
+    const monthNum = parseInt(monthStr) || 1;
+
+    const daysInMonth = new Date(yearNum, monthNum, 0).getDate();
+    const allDays = Array.from({ length: daysInMonth }, (_, i) => {
+      const day = String(i + 1).padStart(2, "0");
+      return `${yearStr}-${monthStr}-${day}`;
+    });
+
+    const allMonths = Array.from({ length: 12 }, (_, i) => {
+      const month = String(i + 1).padStart(2, "0");
+      return `${yearStr}-${month}`;
+    });
+
+    //const currentYear = new Date().getFullYear();
+    //const allYears = Array.from({ length: 10 }, (_, i) => String(currentYear - i));
+
+    // แมพข้อมูลเข้ากับโครงสร้างหลัก
+    if (daily) {
+      rows.forEach((item) => {
+        dataMap[item.hour] = item.ok;
+      });
+      completeData = allHours.map((hour) => ({
+        hour,
+        ok: dataMap[hour] || "0",
+      }));
+    } else if (monthly) {
+      rows.forEach((item) => {
+        dataMap[item.log_date] = item.ok;
+      });
+      completeData = allDays.map((day) => ({
+        log_date: day,
+        ok: dataMap[day] || "0",
+      }));
+    } else if (yearly) {
+      rows.forEach((item) => {
+        dataMap[item.log_month] = item.ok;
+      });
+      completeData = allMonths.map((month) => ({
+        log_month: month,
+        ok: dataMap[month] || "0",
+      }));
+    } else if (All_year === "true") {
+      // 1. หาปีที่เก่าที่สุดจากข้อมูลที่ดึงมา (ถ้าไม่มีข้อมูลเลย ให้ใช้ปีปัจจุบัน)
+      const years = rows.map((item) => parseInt(item.log_year));
+      const minYear =
+        years.length > 0 ? Math.min(...years) : new Date().getFullYear();
+      const currentYear = new Date().getFullYear(); // ปี 2026
+
+      // 2. สร้าง Array รายปีตั้งแต่ปีเก่าสุด จนถึงปีปัจจุบัน
+      const allYears = Array.from(
+        { length: currentYear - minYear + 1 },
+        (_, i) => String(minYear + i),
+      );
+
+      // 3. นำข้อมูลดิบมาใส่ Object สำหรับค้นหา
+      rows.forEach((item) => {
+        dataMap[item.log_year] = item.ok;
+      });
+
+      // 4. แมพข้อมูลให้ครบทุกปี ถ้าปีไหนไม่มีข้อมูลให้ใส่ '0'
+      completeData = allYears.map((year) => ({
+        log_year: year,
+        ok: dataMap[year] || "0",
+      }));
+    }
+
+    res.json(completeData);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Server Error");
+  }
 });
 // ดึงข้อมูลการผลิตตามเงื่อนไขที่กำหนด (รายชั่วโมง, รายวัน, รายเดือน, รายปี)
 // ดึงข้อมมูลรายชั่วโมง  http://localhost:5000/api/production/filter?&daily=2026-09-14
@@ -483,61 +656,61 @@ app.get('/api/production/filter', async (req, res) => {
 // ดึงข้อมูลรายปี       http://localhost:5000/api/production/filter?&mhId=PU-42&All_year=true
 
 // ดึงรายชื่อเป้าหมาย (Machine หรือ Employee) ที่มีข้อมูลตามช่วงเวลา
-app.get('/api/production/targets', async (req, res) => {
-    try {
-        const { viewMode, daily, monthly, yearly, All_year } = req.query;
-        
-        // เลือกว่าจะดึงคอลัมน์ไหนตาม viewMode
-        let targetColumn = viewMode === 'machine' ? 'Mh_ID' : 'Emp_ID';
-        
-        // ใช้ DISTINCT เพื่อไม่ให้ชื่อซ้ำ
-        let query = `SELECT DISTINCT ${targetColumn} AS id FROM production_sum WHERE 1=1`;
-        let params = [];
+app.get("/api/production/targets", async (req, res) => {
+  try {
+    const { viewMode, daily, monthly, yearly, All_year } = req.query;
 
-        if (daily) {
-            query += ` AND CAST(Log_Timestamp AS DATE) = ?`;
-            params.push(daily);
-        } else if (monthly) {
-            query += ` AND DATE_FORMAT(Log_Timestamp, '%Y-%m') = ?`;
-            params.push(monthly);
-        } else if (yearly) {
-            query += ` AND DATE_FORMAT(Log_Timestamp, '%Y') = ?`;
-            params.push(yearly);
-        }
+    // เลือกว่าจะดึงคอลัมน์ไหนตาม viewMode
+    let targetColumn = viewMode === "machine" ? "Mh_ID" : "Emp_ID";
 
-        // ป้องกันค่าว่าง (NULL)
-        query += ` AND ${targetColumn} IS NOT NULL AND ${targetColumn} != ''`;
+    // ใช้ DISTINCT เพื่อไม่ให้ชื่อซ้ำ
+    let query = `SELECT DISTINCT ${targetColumn} AS id FROM production_sum WHERE 1=1`;
+    let params = [];
 
-        const [rows] = await pool.query(query, params);
-        
-        // แปลงให้อยู่ในรูป Array ของ String เช่น ['PU-38', 'PU-42']
-        const targetList = rows.map(row => row.id);
-
-        res.json(targetList);
-    } catch (err) {
-        console.error('Error fetching targets:', err);
-        res.status(500).send('Server Error');
+    if (daily) {
+      query += ` AND CAST(Log_Timestamp AS DATE) = ?`;
+      params.push(daily);
+    } else if (monthly) {
+      query += ` AND DATE_FORMAT(Log_Timestamp, '%Y-%m') = ?`;
+      params.push(monthly);
+    } else if (yearly) {
+      query += ` AND DATE_FORMAT(Log_Timestamp, '%Y') = ?`;
+      params.push(yearly);
     }
+
+    // ป้องกันค่าว่าง (NULL)
+    query += ` AND ${targetColumn} IS NOT NULL AND ${targetColumn} != ''`;
+
+    const [rows] = await pool.query(query, params);
+
+    // แปลงให้อยู่ในรูป Array ของ String เช่น ['PU-38', 'PU-42']
+    const targetList = rows.map((row) => row.id);
+
+    res.json(targetList);
+  } catch (err) {
+    console.error("Error fetching targets:", err);
+    res.status(500).send("Server Error");
+  }
 });
 
 //ถ้าอยากดึงข้อมูลทั้งหมดโดยไม่ระบุเงื่อนไขใด ๆ สามารถเรียก API ได้ดังนี้:
 // ดึงข้อมูลทั้งหมด   http://localhost:5000/api/production/filter?All_year=true
 
-app.get('/api/production/downtime', async (req, res) => {
-    try {
-        const { mhId, empId, datetime,sum } = req.query;
-        let query = '';
-        let params = [];
+app.get("/api/production/downtime", async (req, res) => {
+  try {
+    const { mhId, empId, datetime, sum } = req.query;
+    let query = "";
+    let params = [];
 
-        let year = datetime ? datetime.split('-')[0] : null; // ดึงปีจากวันที่
-        let month = datetime ? datetime.split('-')[1] : null; // ดึงเดือนจากวันที่
-        let day = datetime ? datetime.split('-')[2] : null; // ดึงวันจากวันที่   
+    let year = datetime ? datetime.split("-")[0] : null; // ดึงปีจากวันที่
+    let month = datetime ? datetime.split("-")[1] : null; // ดึงเดือนจากวันที่
+    let day = datetime ? datetime.split("-")[2] : null; // ดึงวันจากวันที่
 
-        if (!datetime) {
-            return res.status(400).json({ message: 'ต้องระบุ datetime' });
-        }
-            if (sum === 'true') {
-                query = `
+    if (!datetime) {
+      return res.status(400).json({ message: "ต้องระบุ datetime" });
+    }
+    if (sum === "true") {
+      query = `
                     SELECT 
                         -- DATE_FORMAT(Start_Time, '%Y-%m-%d %H:%i:%s') AS Start_Time,
                         -- DATE_FORMAT(End_Time, '%Y-%m-%d %H:%i:%s') AS End_Time,
@@ -548,9 +721,8 @@ app.get('/api/production/downtime', async (req, res) => {
                     FROM machin_downtime
                     WHERE 1=1
                 `;
-            }
-            else {
-                query = `
+    } else {
+      query = `
                     SELECT 
                         DATE_FORMAT(Start_Time, '%Y-%m-%d %H:%i:%s') AS Start_Time,
                         DATE_FORMAT(End_Time, '%Y-%m-%d %H:%i:%s') AS End_Time,
@@ -560,47 +732,45 @@ app.get('/api/production/downtime', async (req, res) => {
                     FROM machin_downtime
                     WHERE 1=1
                 `;
-            }
-
-            if (mhId) { 
-                query += `AND Mh_ID = ?`; 
-                params.push(mhId); }
-
-            if (empId) { 
-                query += `AND Emp_ID = ?`; 
-                params.push(empId); }
-            
-            
-            if (year && month && day) {
-                query += ` AND DATE_FORMAT(Start_Time, '%Y-%m-%d') = ?`;
-                params.push(datetime);
-            }
-            else if (year && month) {
-                query += ` AND DATE_FORMAT(Start_Time, '%Y-%m') = ?`;
-                params.push(`${year}-${month}`);
-            }
-            else if (year) {
-                query += ` AND DATE_FORMAT(Start_Time, '%Y') = ?`;
-                params.push(year);
-            }
-
-            if (sum === 'true' && !mhId && !empId) {
-                query += ` group by Mh_ID`;
-            }
-
-            query += ` ORDER BY Start_Time DESC`;
-        
-
-        if (!query) {
-            return res.status(400).json({ message: 'เงื่อนไขไม่ถูกต้อง' });
-        }
-
-        const [rows] = await pool.query(query, params);
-        res.json(rows);
-    } catch (err) {
-        console.error(err);
-        res.status(500).send('Server Error');
     }
+
+    if (mhId) {
+      query += `AND Mh_ID = ?`;
+      params.push(mhId);
+    }
+
+    if (empId) {
+      query += `AND Emp_ID = ?`;
+      params.push(empId);
+    }
+
+    if (year && month && day) {
+      query += ` AND DATE_FORMAT(Start_Time, '%Y-%m-%d') = ?`;
+      params.push(datetime);
+    } else if (year && month) {
+      query += ` AND DATE_FORMAT(Start_Time, '%Y-%m') = ?`;
+      params.push(`${year}-${month}`);
+    } else if (year) {
+      query += ` AND DATE_FORMAT(Start_Time, '%Y') = ?`;
+      params.push(year);
+    }
+
+    if (sum === "true" && !mhId && !empId) {
+      query += ` group by Mh_ID`;
+    }
+
+    query += ` ORDER BY Start_Time DESC`;
+
+    if (!query) {
+      return res.status(400).json({ message: "เงื่อนไขไม่ถูกต้อง" });
+    }
+
+    const [rows] = await pool.query(query, params);
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Server Error");
+  }
 });
 
 // ดึงข้อมูลการหยุดทำงานของเครื่องจักรตามเงื่อนไขที่กำหนด (รายวัน, รายเดือน, รายปี)
@@ -616,6 +786,7 @@ const PORT = process.env.PORT || 5000;
 //app.listen(PORT, async () => {
 //    console.log(`Node.js Server running on http://localhost:${PORT}`);
 app.listen(PORT, async () => {
-    console.log(`Node.js Server running on http://localhost:${PORT}`);
-    setupMQTT();
+  console.log(`Node.js Server running on http://localhost:${PORT}`);
+  scheduleMidnightReset();
+  setupMQTT();
 });
