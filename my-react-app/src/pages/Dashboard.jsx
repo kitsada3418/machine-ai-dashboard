@@ -160,17 +160,17 @@ function Dashboard() {
                                     stopped Machines
                                 </h6>
                                 <h2
-                                    className="fw-bold text-danger my-1"
+                                    className="fw-bold text-warning my-1"
                                     style={{ fontSize: '2.5rem' }}
                                 >
                                     {mhStop}
                                 </h2>
-                                <span className="text-danger small fw-bold">
+                                <span className="text-warning small fw-bold">
                                     <i className="bi bi-exclamation-triangle me-1"></i>Requires
                                     Attention
                                 </span>
                             </div>
-                            <div className="bg-danger bg-opacity-10 text-danger p-3 rounded-circle">
+                            <div className="bg-danger bg-opacity-10 text-warning p-3 rounded-circle">
                                 <i className="bi bi-stop-circle-fill fs-3"></i>
                             </div>
                         </div>
@@ -185,14 +185,14 @@ function Dashboard() {
                                     Avg Cycle Time
                                 </h6>
                                 <h2
-                                    className="fw-bold text-warning my-1"
+                                    className="fw-bold text-secondary my-1"
                                     style={{ fontSize: '2.5rem' }}
                                 >
                                     42.8 <span className="fs-4 text-muted">s</span>
                                 </h2>
                                 <span className="text-muted small">Overall Plant Avg Speed</span>
                             </div>
-                            <div className="bg-warning bg-opacity-10 text-warning p-3 rounded-circle">
+                            <div className="bg-secondary bg-opacity-10 text-secondary p-3 rounded-circle">
                                 <i className="bi bi-stopwatch-fill fs-3"></i>
                             </div>
                         </div>
@@ -225,8 +225,8 @@ function Dashboard() {
                                 onChange={(e) => setStatusFilter(e.target.value)}
                             >
                                 <option value="ALL">All Status</option>
-                                <option value="running">🟢 Running</option>
-                                <option value="stopped">🔴 Stopped</option>
+                                <option value="run">🟢 Running</option>
+                                <option value="stop">🔴 Stopped</option>
                                 <option value="offline">⚪ Offline</option>
                             </select>
                         </div>

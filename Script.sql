@@ -37,3 +37,10 @@ CREATE TABLE audit_logs (
     new_value JSON, -- เก็บข้อมูลที่อัปเดตไปใหม่
     action_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+
+SET GLOBAL time_zone = '+07:00';
+SET time_zone = '+07:00';
+
+SELECT NOW(), CURDATE();
+
