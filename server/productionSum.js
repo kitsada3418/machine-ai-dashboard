@@ -17,7 +17,7 @@ function timeToSeconds(timeStr) {
 async function updateProductionSum(machineId, data) {
      try {
         const query = `
-            insert into Production_SUM (Log_Timestamp, job_id, emp_id, mh_id, ok, ng)
+            insert into production_sum (Log_Timestamp, job_id, emp_id, mh_id, ok, ng)
             values (?, ?, ?, ?, ?, ?)
             on duplicate key update
             ok = values(ok),

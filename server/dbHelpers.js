@@ -44,7 +44,6 @@ async function ensureMachine(mhId_) {
     }
 }
 
-
 async function ensureCustomer(custname_) {
     if (!custname_) return null;
     const custname = String(custname_).trim().toUpperCase();
@@ -84,9 +83,6 @@ async function ensureCustomer(custname_) {
     }
 }
 
-
-
-
 async function ensureTerminal(tName_) {
     if (!tName_ || tName_ === '-') tName_ = 'NONE';
     const tName = String(tName_).trim(); // ตัดช่องว่าง
@@ -96,7 +92,7 @@ async function ensureTerminal(tName_) {
     }
 
     try {
-        let [rows] = await pool.execute('SELECT T_ID FROM terminal_size WHERE T_Name = ?', [tName]);
+        let [rows] = await pool.execute('SELECT T_ID FROM Terminal_size WHERE T_Name = ?', [tName]);
         if (rows.length > 0) {
             const tId = rows[0].T_ID;
             terminalCache.set(tName, tId);
@@ -104,7 +100,7 @@ async function ensureTerminal(tName_) {
         }
         
         // ถ้าตารางเป็น AUTO_INCREMENT แนะนำให้ใช้ตัวนี้ (ไม่ต้องหา MAX เอง ปลอดภัยที่สุด)
-        let [result] = await pool.execute('INSERT INTO terminal_size (T_Name) VALUES (?)', [tName]);
+        let [result] = await pool.execute('INSERT INTO Terminal_size (T_Name) VALUES (?)', [tName]);
         const tId = result.insertId;
         
         terminalCache.set(tName, tId);
@@ -114,7 +110,7 @@ async function ensureTerminal(tName_) {
     } catch (err) {
         // 🔥 ดักจับกรณีชนกัน (Race Condition)
         if (err.code === 'ER_DUP_ENTRY' || err.errno === 1062) {
-            let [rows] = await pool.execute('SELECT T_ID FROM terminal_size WHERE T_Name = ?', [tName]);
+            let [rows] = await pool.execute('SELECT T_ID FROM Terminal_size WHERE T_Name = ?', [tName]);
             if (rows.length > 0) {
                 const tId = rows[0].T_ID;
                 terminalCache.set(tName, tId);
@@ -125,8 +121,6 @@ async function ensureTerminal(tName_) {
         return null;
     }
 }
-
-
 
 
 async function ensureStatus(StatusName_) {
@@ -166,6 +160,5 @@ async function ensureStatus(StatusName_) {
         return null;
     }
 }
-
 
 module.exports = { ensureEmp, ensureCustomer, ensureTerminal, ensureMachine, ensureStatus };

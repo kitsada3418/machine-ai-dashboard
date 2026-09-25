@@ -516,12 +516,12 @@ function Dashboard() {
                                                     {item.alarm ? `${item.alarm} Min` : '-'}
                                                 </span>
                                             </td>
-                                            <td className="fw-bold text-muted">{item.emp_id}</td>
+                                            <td className="fw-bold text-muted">{item.status === 'stop' ? '-' : item.emp_id || '-'}</td>
                                             <td className="fw-bold text-primary">
-                                                {item.customer}
+                                                {item.status === 'stop' ? '-' : item.customer || '-'}
                                             </td>
                                             <td className="fw-bold" style={{ color: '#f37208' }}>
-                                                {item.job_id}
+                                                {item.status === 'stop' ? '-' : item.job_id || '-'}
                                             </td>
 
                                             <td style={{ minWidth: '150px' }}>
@@ -545,10 +545,10 @@ function Dashboard() {
                                                 {Number(item.total_day || 0).toLocaleString()}
                                             </td>
                                             <td className="text-muted small">
-                                                {item.t_start || '-'}
+                                                {item.status === 'stop' ? '-' : item.t_start || '-'}
                                             </td>
                                             <td className="text-muted fw-bold">
-                                                {item.t_run || '-'}
+                                                {item.status === 'stop' ? '-' : item.t_run || '-'}
                                             </td>
                                             <td className="fw-bold">
                                                 <i className="bi bi-stopwatch text-muted me-1"></i>

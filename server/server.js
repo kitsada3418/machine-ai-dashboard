@@ -14,14 +14,12 @@ const app = express();
 app.set("pool", pool);
 
 app.use(helmet());
-const allowedOrigins = process.env.CORS_ORIGINS
-  .split(",")
-  .map((s) => s.trim());
+const allowedOrigins = process.env.CORS_ORIGINS.split(",").map((s) => s.trim());
 app.use(cors({ origin: allowedOrigins }));
 app.use(express.json());
 
 app.use("/api", userRoutes);
-//app.use("/api", authenticateToken);
+app.use("/api", authenticateToken);
 // เก็บ Cache แยกตาม Mh_ID
 
 function scheduleMidnightReset() {
@@ -174,9 +172,14 @@ app.get("/api/data_live", async (req, res) => {
         const pastOk = await getDatadayTime(mhId, machineData.job_id);
         machineData.total_day = Number(pastOk) + Number(machineData.ok || 0);
         machineData.alarm = machineTrackers[mhId]?.isDown 
-          ? Number(((Date.now() - machineTrackers[mhId].downtimeStart) / 60000).toFixed(2))
+          ? Number(((Date.now() - machineTrackers[mhId].downtimeStart) / 60000).toFixed(0))
           : 0;
+
+        if(machineData.job_id === '' && machineData.status === 'RUN') {
+            machineData.status = 'STOP';
+        }
       }
+
     }
     // 4. ถ้ามีเครื่องจักรที่ออฟไลน์ ให้เพิ่ม/อัปเดตสถานะเข้าไปใน liveDataCache
     if (offlineMachineIds.length > 0) {

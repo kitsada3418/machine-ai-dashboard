@@ -7,7 +7,7 @@ const { ensureEmp, ensureCustomer, ensureTerminal, ensureMachine,ensureStatus} =
 const liveDataCache = {};
 const machineTrackers = {}; // 📌 1. ตัวแปรสำหรับติดตามการเปลี่ยนแปลงของแต่ละเครื่อง
 // กำหนดเวลา Snapshot (หน่วย: นาที)
-const SNAPSHOT_INTERVAL_MINUTES = 1;
+const SNAPSHOT_INTERVAL_MINUTES = 10;
 
 // 📌 2. ฟังก์ชันบันทึกข้อมูล Downtime ลง Database
 async function saveDowntimeLog(empId, mhId, startTime, endTime) {
@@ -188,9 +188,16 @@ function setupMQTT() {
                     };
                 }
 
+                if (liveDataCache[machineId].job_id === ''  && liveDataCache[machineId].status === 'RUN'){
+                    machineTrackers[machineId].lastChangeTime = now; // อัปเดตเวลาล่าสุดที่ยอดขยับ
+                    machineTrackers[machineId].isDown = false; // รีเซ็ตสถานะ Downtime เพราะเครื่องกำลัง RUN
+                }
+
                 const tracker = machineTrackers[machineId];
                 tracker.emp_id = empId; // อัปเดตรหัสพนักงานล่าสุด
                 tracker.lastSeen =now; // อัปเดตเวลาที่เครื่องถูกเห็นล่าสุด
+
+                
 
                 // ถ้าชิ้นงานเพิ่มขึ้น (เครื่องกลับมาผลิตต่อ)
                 if (currentTotal > tracker.lastTotal)  {
@@ -202,11 +209,12 @@ function setupMQTT() {
                         tracker.isDown = false;
                         tracker.downtimeStart = null;
                     }
-
                     // อัปเดตยอดใหม่และเวลาล่าสุดที่ยอดขยับ
                     tracker.lastTotal = currentTotal;
                     tracker.lastChangeTime = now;
                 }
+
+                
 
                 liveDataCache[machineId] = {
                     status: data.status,
