@@ -14,14 +14,14 @@ const app = express();
 app.set("pool", pool);
 
 app.use(helmet());
-const allowedOrigins = (process.env.CORS_ORIGINS || "http://localhost:5173")
+const allowedOrigins = process.env.CORS_ORIGINS
   .split(",")
   .map((s) => s.trim());
 app.use(cors({ origin: allowedOrigins }));
 app.use(express.json());
 
 app.use("/api", userRoutes);
-app.use("/api", authenticateToken);
+//app.use("/api", authenticateToken);
 // เก็บ Cache แยกตาม Mh_ID
 
 function scheduleMidnightReset() {
@@ -95,7 +95,7 @@ async function getDatadayTime(mhId, jobId) {
   const currentJobKey = jobId === null || jobId === undefined ? '-offline-' : jobId;
   
   if (machineCache[mhId] && machineCache[mhId].jobId === currentJobKey) {
-    console.log(`do not fetch from DB, use cache for Mh_ID: ${mhId}, Job ID: ${currentJobKey}`);
+    //console.log(`do not fetch from DB, use cache for Mh_ID: ${mhId}, Job ID: ${currentJobKey}`);
     return machineCache[mhId].total_ok;
   }
 
@@ -174,9 +174,8 @@ app.get("/api/data_live", async (req, res) => {
         const pastOk = await getDatadayTime(mhId, machineData.job_id);
         machineData.total_day = Number(pastOk) + Number(machineData.ok || 0);
         machineData.alarm = machineTrackers[mhId]?.isDown 
-          ? Math.floor((Date.now() - machineTrackers[mhId].lastChangeStart) / 1000) 
+          ? Number(((Date.now() - machineTrackers[mhId].downtimeStart) / 60000).toFixed(2))
           : 0;
-
       }
     }
     // 4. ถ้ามีเครื่องจักรที่ออฟไลน์ ให้เพิ่ม/อัปเดตสถานะเข้าไปใน liveDataCache
@@ -399,7 +398,7 @@ app.get("/api/production/filter", async (req, res) => {
       });
     }
 
-    // --- เตรียมเงื่อนไข WHERE พื้นฐานสำหรับ CTE (เพื่อให้กวาดเฉพาะข้อมูลที่จำเป็น) ---
+    // --- เตรียมเงื่อนไข WHERE พื้นฐานสำหรับ CTE ---
     let baseWhere = "WHERE 1=1";
     let cteParams = [];
     if (empId) {
@@ -419,26 +418,34 @@ app.get("/api/production/filter", async (req, res) => {
                     Mh_ID, 
                     Job_ID, 
                     DATE_FORMAT(Log_Timestamp, '%Y-%m-%d %H:00:00') AS full_bucket, 
+                    DATE_FORMAT(Log_Timestamp, '%Y-%m-%d') AS log_date,
                     MAX(OK) AS max_ok
                 FROM production_sum 
                 ${baseWhere}
-                GROUP BY Mh_ID, Job_ID, DATE_FORMAT(Log_Timestamp, '%Y-%m-%d %H:00:00')
+                AND DATE_FORMAT(Log_Timestamp, '%Y-%m-%d') = ?
+                GROUP BY Mh_ID, Job_ID, DATE_FORMAT(Log_Timestamp, '%Y-%m-%d %H:00:00'), DATE_FORMAT(Log_Timestamp, '%Y-%m-%d')
             ),
             CalculatedDelta AS (
                 SELECT 
                     full_bucket, 
-                    GREATEST(0, max_ok - COALESCE(LAG(max_ok) OVER (PARTITION BY Mh_ID, Job_ID ORDER BY full_bucket), 0)) AS actual_ok
+                    log_date,
+                    max_ok,
+                    -- เช็คว่า ถ้าแถวก่อนหน้าเป็นคนละวันกัน ให้ถือว่ายอดก่อนหน้าเป็น 0 ทันที (ไม่เอาข้ามวันมาลบ)
+                    CASE 
+                        WHEN LAG(log_date) OVER (PARTITION BY Mh_ID, Job_ID ORDER BY full_bucket) = log_date 
+                        THEN GREATEST(0, max_ok - LAG(max_ok) OVER (PARTITION BY Mh_ID, Job_ID ORDER BY full_bucket))
+                        ELSE max_ok -- ถ้าเป็นชั่วโมงแรกของวันใหม่ เอาค่า max_ok มาเป็นยอดผลิตจริงได้เลย
+                    END AS actual_ok
                 FROM GroupedMax
             )
             SELECT 
                 DATE_FORMAT(full_bucket, '%H:00') AS hour, 
                 SUM(actual_ok) AS ok
             FROM CalculatedDelta
-            WHERE DATE_FORMAT(full_bucket, '%Y-%m-%d') = ?
             GROUP BY DATE_FORMAT(full_bucket, '%H:00')
             ORDER BY hour;
         `;
-        params = [...cteParams, daily];
+        params = [...cteParams, daily, daily, daily];
       } catch (err) {
         console.error("Error constructing daily query:", err);
         return res.status(500).send("Server Error");
@@ -446,28 +453,22 @@ app.get("/api/production/filter", async (req, res) => {
     } else if (monthly) {
       try {
         query = `
-            WITH GroupedMax AS (
+            WITH DailyMax AS (
                 SELECT 
                     Mh_ID, 
                     Job_ID, 
-                    DATE_FORMAT(Log_Timestamp, '%Y-%m-%d') AS full_bucket, 
+                    DATE_FORMAT(Log_Timestamp, '%Y-%m-%d') AS log_date, 
                     MAX(OK) AS max_ok
                 FROM production_sum 
                 ${baseWhere}
+                AND DATE_FORMAT(Log_Timestamp, '%Y-%m') = ?
                 GROUP BY Mh_ID, Job_ID, DATE_FORMAT(Log_Timestamp, '%Y-%m-%d')
-            ),
-            CalculatedDelta AS (
-                SELECT 
-                    full_bucket, 
-                    GREATEST(0, max_ok - COALESCE(LAG(max_ok) OVER (PARTITION BY Mh_ID, Job_ID ORDER BY full_bucket), 0)) AS actual_ok
-                FROM GroupedMax
             )
             SELECT 
-                full_bucket AS log_date, 
-                SUM(actual_ok) AS ok
-            FROM CalculatedDelta
-            WHERE DATE_FORMAT(full_bucket, '%Y-%m') = ?
-            GROUP BY full_bucket
+                log_date, 
+                SUM(max_ok) AS ok
+            FROM DailyMax
+            GROUP BY log_date
             ORDER BY log_date;
         `;
         params = [...cteParams, monthly];
@@ -478,28 +479,29 @@ app.get("/api/production/filter", async (req, res) => {
     } else if (yearly) {
       try {
         query = `
-            WITH GroupedMax AS (
+            WITH DailyMax AS (
                 SELECT 
                     Mh_ID, 
                     Job_ID, 
-                    DATE_FORMAT(Log_Timestamp, '%Y-%m') AS full_bucket, 
+                    DATE_FORMAT(Log_Timestamp, '%Y-%m-%d') AS log_date, 
                     MAX(OK) AS max_ok
                 FROM production_sum 
                 ${baseWhere}
-                GROUP BY Mh_ID, Job_ID, DATE_FORMAT(Log_Timestamp, '%Y-%m')
+                AND DATE_FORMAT(Log_Timestamp, '%Y') = ?
+                GROUP BY Mh_ID, Job_ID, DATE_FORMAT(Log_Timestamp, '%Y-%m-%d')
             ),
-            CalculatedDelta AS (
+            DailyTotal AS (
                 SELECT 
-                    full_bucket, 
-                    GREATEST(0, max_ok - COALESCE(LAG(max_ok) OVER (PARTITION BY Mh_ID, Job_ID ORDER BY full_bucket), 0)) AS actual_ok
-                FROM GroupedMax
+                    log_date, 
+                    SUM(max_ok) AS daily_ok
+                FROM DailyMax
+                GROUP BY log_date
             )
             SELECT 
-                full_bucket AS log_month, 
-                SUM(actual_ok) AS ok
-            FROM CalculatedDelta
-            WHERE DATE_FORMAT(full_bucket, '%Y') = ?
-            GROUP BY full_bucket
+                DATE_FORMAT(log_date, '%Y-%m') AS log_month, 
+                SUM(daily_ok) AS ok
+            FROM DailyTotal
+            GROUP BY DATE_FORMAT(log_date, '%Y-%m')
             ORDER BY log_month;
         `;
         params = [...cteParams, yearly];
@@ -510,27 +512,28 @@ app.get("/api/production/filter", async (req, res) => {
     } else if (All_year === "true") {
       try {
         query = `
-            WITH GroupedMax AS (
+            WITH DailyMax AS (
                 SELECT 
                     Mh_ID, 
                     Job_ID, 
-                    DATE_FORMAT(Log_Timestamp, '%Y') AS full_bucket, 
+                    DATE_FORMAT(Log_Timestamp, '%Y-%m-%d') AS log_date, 
                     MAX(OK) AS max_ok
                 FROM production_sum 
                 ${baseWhere}
-                GROUP BY Mh_ID, Job_ID, DATE_FORMAT(Log_Timestamp, '%Y')
+                GROUP BY Mh_ID, Job_ID, DATE_FORMAT(Log_Timestamp, '%Y-%m-%d')
             ),
-            CalculatedDelta AS (
+            DailyTotal AS (
                 SELECT 
-                    full_bucket, 
-                    GREATEST(0, max_ok - COALESCE(LAG(max_ok) OVER (PARTITION BY Mh_ID, Job_ID ORDER BY full_bucket), 0)) AS actual_ok
-                FROM GroupedMax
+                    log_date, 
+                    SUM(max_ok) AS daily_ok
+                FROM DailyMax
+                GROUP BY log_date
             )
             SELECT 
-                full_bucket AS log_year, 
-                SUM(actual_ok) AS ok
-            FROM CalculatedDelta
-            GROUP BY full_bucket
+                DATE_FORMAT(log_date, '%Y') AS log_year, 
+                SUM(daily_ok) AS ok
+            FROM DailyTotal
+            GROUP BY DATE_FORMAT(log_date, '%Y')
             ORDER BY log_year;
         `;
         params = [...cteParams];
@@ -544,8 +547,7 @@ app.get("/api/production/filter", async (req, res) => {
     const dataMap = {};
     let completeData = []; 
 
-    // --- โค้ดส่วนล่าง (Data Mapping & Filling Gaps) คงไว้ตามเดิม เพราะเขียนมาได้ดีมากแล้ว ---
-    
+    // --- ส่วนการแมพข้อมูลให้ครบทุกช่วงเวลา (Data Mapping & Filling Gaps) ---
     const allHours = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0") + ":00");
     const targetDate = daily || monthly || new Date().toISOString().slice(0, 7);
     const [yearStr, monthStr] = targetDate.split("-");

@@ -513,7 +513,7 @@ function Dashboard() {
                                                 <span
                                                     className={`badge bg-${statusAlarmColor} bg-opacity-10 text-${statusAlarmColor} border border-${statusAlarmColor} rounded-pill px-3`}
                                                 >
-                                                    {item.alarm ? `${item.alarm} s` : '-'}
+                                                    {item.alarm ? `${item.alarm} Min` : '-'}
                                                 </span>
                                             </td>
                                             <td className="fw-bold text-muted">{item.emp_id}</td>

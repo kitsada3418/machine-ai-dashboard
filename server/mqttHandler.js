@@ -31,7 +31,6 @@ async function saveDowntimeLog(empId, mhId, startTime, endTime) {
             return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
         };
 
-
         await pool.execute(query, [
             empId || null,
             mhId || null,
@@ -89,36 +88,42 @@ function startSumSnapshotTimer() {
     async function updateSumSnapshot() {
         for (const [machineId, data] of Object.entries(liveDataCache)) {
             if (!data.job_id) {
-                console.log(`${machineId} Job id is null`);
+                // console.log(`${machineId} Job id is null`);
                 continue; // ข้ามเครื่องจักรที่ไม่มี Job ID
             }
 
-            else if (data.status !== 'RUN') {
-                console.log(`${machineId} status : ${data.status}`);
+            // ถ้าเครื่องเพิ่งเปิด ยอดยังเป็น 0 ให้ข้ามไปก่อน
+            if (data.ok === 0 && data.ng === 0) {
                 continue;
             }
 
-            else if (data.ok === 0 && data.ng === 0) {
-                console.log(`${machineId} OK NG = 0`);
-                continue;
+            // ป้องกันปัญหายอดหายเวลาเครื่องหยุด: เปลี่ยนมาเช็คว่ายอดขยับเพิ่มขึ้นหรือไม่แทนการเช็คสถานะ RUN
+            if (data.ok === data.last_saved_ok && data.ng === data.last_saved_ng) {
+                // ยอดเท่าเดิมกับชั่วโมงที่แล้ว ไม่ต้องบันทึกซ้ำ
+                continue; 
             }
 
-           try { 
-            // 2. เติม await เพื่อบังคับให้ระบบ "รอ" จนกว่าจะ Insert ลงตาราง Master Data เสร็จ
+            try { 
+                // บังคับรอจนกว่าจะ Insert ลงตาราง Master Data เสร็จ
                 await ensureEmp(data.emp_id);
                 await ensureMachine(data.mh_id);
                 await ensureCustomer(data.customer);
             
-                // 3. พอ 2 บรรทัดบนเสร็จชัวร์ๆ ค่อยสั่งบันทึกลงตาราง Sum
+                // บันทึกลงตาราง Sum
                 await updateProductionSum(machineId, data).catch(err => {
                     console.error('[Snapshot Error]', err.message);
                 });
+
+                // เมื่อบันทึกสำเร็จ อัปเดตค่ายอดไว้เทียบในชั่วโมงถัดไป
+                data.last_saved_ok = data.ok;
+                data.last_saved_ng = data.ng;
+
             } catch (err) {
-                // ถ้ายูสเซอร์หรือ Database เออเร่อตรงไหน จะเด้งมาแสดงผลตรงนี้ที่เดียว โค้ดจะดูสะอาดขึ้น
                 console.error(`[Snapshot Error] Machine ${machineId}:`, err.message);
             }
         }
     }
+    
     scheduleNext();
 }
 
