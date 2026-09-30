@@ -1,7 +1,5 @@
 const pool = require('./db');
 //const { ensureEmp, ensureCustomer, ensureTerminal, ensureMachine} = require('./dbHelpers');
-const logTime = new Date();
-logTime.setMinutes(0, 0, 0);
 
 function timeToSeconds(timeStr) {
     if (!timeStr || timeStr === '-') return null;
@@ -16,6 +14,9 @@ function timeToSeconds(timeStr) {
 
 async function updateProductionSum(machineId, data) {
      try {
+        // คำนวณชั่วโมงปัจจุบันทุกครั้ง (ห้ามแช่แข็งนอกฟังก์ชัน — ข้ามชั่วโมง/เที่ยงคืน timestamp จะเพี้ยน)
+        const logTime = new Date();
+        logTime.setMinutes(0, 0, 0);
         const query = `
             insert into production_sum (Log_Timestamp, job_id, emp_id, mh_id, ok, ng)
             values (?, ?, ?, ?, ?, ?)
@@ -34,7 +35,7 @@ async function updateProductionSum(machineId, data) {
 
         await pool.execute(query, values);
         
-        //console.log(`[Sum updated] Machine: ${machineId}`);
+        console.log(`[Sum updated] Machine: ${machineId}`);
 
     } catch (err) {
         console.error(`[DB Error] updateProductionSum:`, err.message);

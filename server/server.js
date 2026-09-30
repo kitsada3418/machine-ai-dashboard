@@ -4,7 +4,10 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
-const { setupMQTT, liveDataCache, machineTrackers } = require("./mqttHandler");
+const {
+  setupMQTT,
+  liveDataCache,
+} = require("./mqttHandler");
 const { authenticateToken } = require("./authMiddleware");
 const userRoutes = require("./userRoutes"); // (สมมติว่าเซฟชื่อไฟล์ว่า userRoutes.js)
 
@@ -19,35 +22,9 @@ app.use(cors({ origin: allowedOrigins }));
 app.use(express.json());
 
 app.use("/api", userRoutes);
-app.use("/api", authenticateToken);
+//app.use("/api", authenticateToken);
 // เก็บ Cache แยกตาม Mh_ID
 
-function scheduleMidnightReset() {
-  const now = new Date();
-  // คำนวณเวลาเที่ยงคืนของวันถัดไป (00:00:00)
-  const night = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate() + 1,
-    0,
-    0,
-    0,
-  );
-  const timeToMidnight = night.getTime() - now.getTime();
-
-  // ตั้งเวลาให้ทำงานเมื่อถึงเที่ยงคืน
-  setTimeout(() => {
-    machineCache = {}; // เคลียร์แคชข้อมูลการผลิต
-    cachedMachineList = []; // เคลียร์แคชรายชื่อเครื่องจักร (เพื่อให้ดึง Master ใหม่ของวันใหม่ถ้าจำเป็น)
-
-    console.log(
-      "🔄 [Midnight Reset] ล้างข้อมูล machineCache และ cachedMachineList ประจำวันใหม่เรียบร้อยแล้ว",
-    );
-
-    // วนลูปตั้งเวลารอเที่ยงคืนของวันถัดไปต่อทันที
-    scheduleMidnightReset();
-  }, timeToMidnight);
-}
 
 async function getMasterDataSummary(mhId_All, empId_All, mh_count, emp_count) {
   try {
@@ -89,9 +66,14 @@ let machineCache = {};
 let cachedMachineList = [];
 
 async function getDatadayTime(mhId, jobId) {
+  // trim กัน job_id มีช่องว่าง/ชนิดต่างกัน ทำให้เทียบ cache และ `job_id != ?` คลาดเคลื่อน
+  const trimmedJobId =
+    jobId === null || jobId === undefined ? null : String(jobId).trim();
+  const hasJob = trimmedJobId !== null && trimmedJobId !== "";
+
   // 1. ตรวจสอบ Cache ก่อน (ต้องมีข้อมูลและ Job ID ต้องตรงกัน)
-  const currentJobKey = jobId === null || jobId === undefined ? '-offline-' : jobId;
-  
+  const currentJobKey = hasJob ? trimmedJobId : "-offline-";
+
   if (machineCache[mhId] && machineCache[mhId].jobId === currentJobKey) {
     //console.log(`do not fetch from DB, use cache for Mh_ID: ${mhId}, Job ID: ${currentJobKey}`);
     return machineCache[mhId].total_ok;
@@ -102,7 +84,7 @@ async function getDatadayTime(mhId, jobId) {
     let queryParams = [];
 
     // 2. จัดการ Query ตามสถานะ Job โดยใช้ซับคิวรีรวมยอด max ของแต่ละ Job ป้องกันค่าหาย
-    if (jobId === null || jobId === undefined) {
+    if (!hasJob) {
       query = `SELECT SUM(max_ok_per_job) AS total_ok
                FROM (
                    SELECT Mh_ID, job_id, MAX(ok) AS max_ok_per_job
@@ -122,7 +104,7 @@ async function getDatadayTime(mhId, jobId) {
                    AND job_id != ?
                    GROUP BY Mh_ID, job_id
                ) AS subquery;`;
-      queryParams = [mhId, jobId];
+      queryParams = [mhId, trimmedJobId];
     }
 
     const [rows] = await pool.query(query, queryParams);
@@ -145,7 +127,6 @@ async function getDatadayTime(mhId, jobId) {
 
 app.get("/api/data_live", async (req, res) => {
   try {
-    // 1. ถ้า cache รายชื่อเครื่องว่าง ให้ดึงข้อมูลจากฐานข้อมูล
     if (!cachedMachineList.mhList || cachedMachineList.mhList.length === 0) {
       cachedMachineList = await getMasterDataSummary(
         "true",
@@ -154,71 +135,37 @@ app.get("/api/data_live", async (req, res) => {
         "false",
       );
     }
-    // 2. ตรวจสอบเครื่องจักรที่ไม่ได้ส่งข้อมูลมาที่ liveDataCache (ทำนอกลูป รอบเดียวพอ)
-    let offlineMachineIds = [];
 
-    if (cachedMachineList && cachedMachineList.mhList) {
-      offlineMachineIds = cachedMachineList.mhList.filter(
-        (mhId) => !liveDataCache[mhId],
-      );
+// 2. ประกาศตัวแปรเก็บยอดสรุป
+    let mh_run = 0;
+    let mh_stop = 0;
+    let sumTotalDay = 0;
+    let mh_online = 0;
+
+    // 3. วนลูป Object.values แค่ "ครั้งเดียว" (ประหยัดทรัพยากรเซิร์ฟเวอร์)
+    for (const item of Object.values(liveDataCache)) {
+      sumTotalDay += (Number(item.total_day) || 0);
+
+      // นับสถานะเครื่องที่ออนไลน์และส่งข้อมูลเข้ามาแล้ว
+      if (item.status === "RUN") mh_run++;
+      else if (item.status === "STOP") mh_stop++;
+      
+      // นับว่ามีเครื่องออนไลน์รวมกี่เครื่อง
+      if (item.status !== "OFFLINE") mh_online++;
     }
 
-    // 3. ถ้ามีข้อมูลใน liveDataCache ให้วนลูปอัปเดตเครื่องที่ออนไลน์อยู่
-    if (liveDataCache && Object.keys(liveDataCache).length > 0) {
-      for (const [mhId, machineData] of Object.entries(liveDataCache)) {
-        // ข้ามเครื่องที่เป็น OFFLINE ไปก่อน (เดี๋ยวไปจัดการทีเดียวข้างล่าง)
-        if (machineData.status === "OFFLINE") continue;
-
-        const pastOk = await getDatadayTime(mhId, machineData.job_id);
-        machineData.total_day = Number(pastOk) + Number(machineData.ok || 0);
-        machineData.alarm = machineTrackers[mhId]?.isDown 
-          ? Number(((Date.now() - machineTrackers[mhId].downtimeStart) / 60000).toFixed(0))
-          : 0;
-
-        if(machineData.job_id === '' && machineData.status === 'RUN') {
-            machineData.status = 'STOP';
-        }
-      }
-
-    }
-    // 4. ถ้ามีเครื่องจักรที่ออฟไลน์ ให้เพิ่ม/อัปเดตสถานะเข้าไปใน liveDataCache
-    if (offlineMachineIds.length > 0) {
-      for (const mhId of offlineMachineIds) {
-        if (machineCache[mhId] && machineCache[mhId].jobId !== '-offline-' && machineCache[mhId].jobId !== undefined) continue; 
-
-        const pastOk = await getDatadayTime(mhId, undefined);
-
-        console.log(`Offline Machine: ${mhId}, Past OK: ${pastOk}`);
-        liveDataCache[mhId] = {
-          status: "OFFLINE",
-          total_ok: pastOk,
-          total_day: pastOk,
-        };
-      }
-    }
-
-
-    // 5. คำนวณยอดรวมทั้งหมดของโรงงาน
-    const sumTotalDay = Object.values(liveDataCache).reduce((acc, item) => {
-      return Number(acc) + (Number(item.total_day) || 0);
-    }, 0);
+    // 4. คำนวณเครื่อง OFFLINE ที่แท้จริง (ทั้งหมด - ออนไลน์)
+    const mh_count = cachedMachineList.mhCount || 0;
+    const real_offline = mh_count - mh_online;
 
     // 6. ส่งข้อมูลทั้งหมดกลับไป
     res.json({
       mh_count: cachedMachineList.mhCount || 0,
       mh_list: cachedMachineList.mhList || [],
-      mh_online: Object.values(liveDataCache).filter(
-        (item) => item.status !== "OFFLINE",
-      ).length,
-      mh_run: Object.values(liveDataCache).filter(
-        (item) => item.status === "RUN",
-      ).length,
-      mh_stop: Object.values(liveDataCache).filter(
-        (item) => item.status === "STOP",
-      ).length,
-      mh_offline: Object.values(liveDataCache).filter(
-        (item) => item.status === "OFFLINE",
-      ).length,
+      mh_online: mh_online,
+      mh_run: mh_run,
+      mh_stop: mh_stop,
+      mh_offline: real_offline,
       total_day: sumTotalDay,
       data: liveDataCache,
     });
@@ -227,6 +174,8 @@ app.get("/api/data_live", async (req, res) => {
     res.status(500).send("Server Error");
   }
 });
+
+
 
 app.get("/api/production/selectData", async (req, res) => {
   try {
@@ -548,7 +497,7 @@ app.get("/api/production/filter", async (req, res) => {
 
     const [rows] = await pool.query(query, params);
     const dataMap = {};
-    let completeData = []; 
+    let completeData = [];
 
     // --- ส่วนการแมพข้อมูลให้ครบทุกช่วงเวลา (Data Mapping & Filling Gaps) ---
     const allHours = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0") + ":00");
@@ -595,7 +544,7 @@ app.get("/api/production/filter", async (req, res) => {
     } else if (All_year === "true") {
       const years = rows.map((item) => parseInt(item.log_year));
       const minYear = years.length > 0 ? Math.min(...years) : new Date().getFullYear();
-      const currentYear = new Date().getFullYear(); 
+      const currentYear = new Date().getFullYear();
 
       const allYears = Array.from(
         { length: currentYear - minYear + 1 },
@@ -755,6 +704,5 @@ const PORT = process.env.PORT || 5000;
 //    console.log(`Node.js Server running on http://localhost:${PORT}`);
 app.listen(PORT, async () => {
   console.log(`Node.js Server running on http://localhost:${PORT}`);
-  scheduleMidnightReset();
   setupMQTT();
 });

@@ -1,6 +1,5 @@
 const pool = require('./db');
 //const { ensureEmp, ensureCustomer, ensureTerminal, ensureMachine, ensureStatus } = require('./dbHelpers');
-const dateOnly = new Date().toLocaleDateString('en-GB');
 
 
 function combineDateTime(dateStr, timeStr) {
@@ -10,6 +9,8 @@ function combineDateTime(dateStr, timeStr) {
 }
 
 async function saveProductionLog(machineId, data) {
+    // วันที่ปัจจุบัน ณ เวลานี้เรียก (ห้ามแช่แข็งนอกฟังก์ชัน — ข้ามเที่ยงคืน log จะลงวันผิด)
+    const dateOnly = new Date().toLocaleDateString('en-GB');
     const dataConvert = {};
     dataConvert.job_id = data.JOB;
     dataConvert.emp_id = data.ID;
