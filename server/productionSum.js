@@ -3,43 +3,63 @@ const pool = require('./db');
 
 function timeToSeconds(timeStr) {
     if (!timeStr || timeStr === '-') return null;
-    const parts = timeStr.split(':');               //"02:15:30" จะถูกจับแยกออกเป็น Array คือ ["02", "15", "30"]
-    if (parts.length !== 3) return null;            //ตรวจสอบความถูกต้องของรูปแบบเวลา ว่าหั่นออกมาแล้วมีครบ 3 ส่วน (ชั่วโมง, นาที, วินาที)
+    const parts = timeStr.split(':');
+    if (parts.length !== 3) return null;
     return parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseInt(parts[2]);
-        //แปลงข้อความแต่ละท่อนให้เป็นตัวเลขจำนวนเต็ม (parseInt) แล้วจับคำนวณรวมกันเป็นวินาที:
-        //ส่วนที่ 1 (parts[0]): คือชั่วโมง นำไปคูณ 3,600 (1 ชั่วโมง = 3,600 วินาที)
-        //ส่วนที่ 2 (parts[1]): คือนาที นำไปคูณ 60 (1 นาที = 60 วินาที)
-        //ส่วนที่ 3 (parts[2]): คือเศษวินาที นำมาบวกรวมได้เลยตรงๆ
 }
 
 async function updateProductionSum(machineId, data) {
-     try {
-        // คำนวณชั่วโมงปัจจุบันทุกครั้ง (ห้ามแช่แข็งนอกฟังก์ชัน — ข้ามชั่วโมง/เที่ยงคืน timestamp จะเพี้ยน)
+    try {
+        // คำนวณชั่วโมงปัจจุบัน
         const logTime = new Date();
         logTime.setMinutes(0, 0, 0);
-        const query = `
-            insert into production_sum (Log_Timestamp, job_id, emp_id, mh_id, ok, ng)
-            values (?, ?, ?, ?, ?, ?)
-            on duplicate key update
-            ok = values(ok),
-            ng = values(ng)
-        `;
-        const values = [
-            logTime, // Log_Timestamp
-            data.job_id ,
-            data.emp_id ,
-            data.mh_id ,
-            data.ok ,
-            data.ng
-        ];
 
-        await pool.execute(query, values);
-        
-        console.log(`[Sum updated] Machine: ${machineId}`);
+        // 1. ค้นหาข้อมูล "ล่าสุด" ของเครื่องนี้และจ๊อบนี้ ในชั่วโมงนี้
+        const selectQuery = `
+            SELECT id, ok 
+            FROM production_sum 
+            WHERE mh_id = ? AND job_id = ? AND Log_Timestamp = ? 
+            ORDER BY id DESC LIMIT 1
+        `;
+        const [rows] = await pool.execute(selectQuery, [data.mh_id, data.job_id, logTime]);
+
+        if (rows.length === 0) {
+            // กรณีที่ 1: เพิ่งขึ้นชั่วโมงใหม่ หรือยังไม่มีข้อมูลเลย -> สร้างแถวใหม่ (INSERT)
+            const insertQuery = `
+                INSERT INTO production_sum (Log_Timestamp, job_id, emp_id, mh_id, ok, ng)
+                VALUES (?, ?, ?, ?, ?, ?)
+            `;
+            await pool.execute(insertQuery, [logTime, data.job_id, data.emp_id, data.mh_id, data.ok, data.ng]);
+            console.log(`[Sum Inserted - New Hour] Machine: ${machineId}`);
+            
+        } else {
+            const latestRecord = rows[0];
+
+            if (Number(data.ok) < Number(latestRecord.ok)) {
+                // กรณีที่ 2: ยอดน้อยกว่าเดิม (ขึ้นจ๊อบเดิมแต่เริ่ม 0 ใหม่กลางชั่วโมง) -> สร้างแถวใหม่ (INSERT)
+                const insertQuery = `
+                    INSERT INTO production_sum (Log_Timestamp, job_id, emp_id, mh_id, ok, ng)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                `;
+                await pool.execute(insertQuery, [logTime, data.job_id, data.emp_id, data.mh_id, data.ok, data.ng]);
+                console.log(`[Sum Inserted - Job Reset] Machine: ${machineId}`);
+                
+            } else {
+                // กรณีที่ 3: ยอดเพิ่มขึ้นปกติ -> อัปเดตทับแถวเดิม (UPDATE) อ้างอิงตาม id ล่าสุด
+                const updateQuery = `
+                    UPDATE production_sum 
+                    SET ok = ?, ng = ?, emp_id = ? 
+                    WHERE id = ?
+                `;
+                // อัปเดต emp_id ด้วย เผื่อมีการเปลี่ยนพนักงานระหว่างรันจ๊อบ
+                await pool.execute(updateQuery, [data.ok, data.ng, data.emp_id, latestRecord.id]);
+                console.log(`[Sum Updated - Normal] Machine: ${machineId}`);
+            }
+        }
 
     } catch (err) {
         console.error(`[DB Error] updateProductionSum:`, err.message);
     }
 }
     
-module.exports = {updateProductionSum };
+module.exports = { updateProductionSum, timeToSeconds };

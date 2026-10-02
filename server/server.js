@@ -62,78 +62,19 @@ async function getMasterDataSummary(mhId_All, empId_All, mh_count, emp_count) {
   }
 }
 
-let machineCache = {};
-let cachedMachineList = [];
+let cachedMachineList = {};
 
-async function getDatadayTime(mhId, jobId) {
-  // trim กัน job_id มีช่องว่าง/ชนิดต่างกัน ทำให้เทียบ cache และ `job_id != ?` คลาดเคลื่อน
-  const trimmedJobId =
-    jobId === null || jobId === undefined ? null : String(jobId).trim();
-  const hasJob = trimmedJobId !== null && trimmedJobId !== "";
-
-  // 1. ตรวจสอบ Cache ก่อน (ต้องมีข้อมูลและ Job ID ต้องตรงกัน)
-  const currentJobKey = hasJob ? trimmedJobId : "-offline-";
-
-  if (machineCache[mhId] && machineCache[mhId].jobId === currentJobKey) {
-    //console.log(`do not fetch from DB, use cache for Mh_ID: ${mhId}, Job ID: ${currentJobKey}`);
-    return machineCache[mhId].total_ok;
-  }
-
-  try {
-    let query = "";
-    let queryParams = [];
-
-    // 2. จัดการ Query ตามสถานะ Job โดยใช้ซับคิวรีรวมยอด max ของแต่ละ Job ป้องกันค่าหาย
-    if (!hasJob) {
-      query = `SELECT SUM(max_ok_per_job) AS total_ok
-               FROM (
-                   SELECT Mh_ID, job_id, MAX(ok) AS max_ok_per_job
-                   FROM production_sum
-                   WHERE Mh_ID = ?
-                   AND Log_Timestamp >= CURDATE()
-                   GROUP BY Mh_ID, job_id
-               ) AS subquery;`;
-      queryParams = [mhId];
-    } else {
-      query = `SELECT SUM(max_ok_per_job) AS total_ok
-               FROM (
-                   SELECT Mh_ID, job_id, MAX(ok) AS max_ok_per_job
-                   FROM production_sum
-                   WHERE Mh_ID = ?
-                   AND Log_Timestamp >= CURDATE()
-                   AND job_id != ?
-                   GROUP BY Mh_ID, job_id
-               ) AS subquery;`;
-      queryParams = [mhId, trimmedJobId];
-    }
-
-    const [rows] = await pool.query(query, queryParams);
-    const totalOk = rows[0].total_ok || 0;
-
-    // 3. บันทึกผลลัพธ์ลง Cache
-    machineCache[mhId] = {
-      jobId: currentJobKey,
-      total_ok: totalOk,
-    };
-
-    console.log(`Cached data for Mh_ID: ${mhId}, Job ID: ${currentJobKey}:`, machineCache[mhId]);
-
-    return totalOk;
-  } catch (error) {
-    console.error(`Error fetching data for Mh_ID: ${mhId}, Job ID: ${jobId}`, error);
-    return 0;
-  }
-}
 
 app.get("/api/data_live", async (req, res) => {
   try {
-    if (!cachedMachineList.mhList || cachedMachineList.mhList.length === 0) {
-      cachedMachineList = await getMasterDataSummary(
+    if (!cachedMachineList?.mhList || cachedMachineList.mhList.length === 0) {
+      const summaryResult = await getMasterDataSummary(
         "true",
         "false",
         "true",
         "false",
       );
+      cachedMachineList = summaryResult || {};
     }
 
 // 2. ประกาศตัวแปรเก็บยอดสรุป
@@ -155,7 +96,7 @@ app.get("/api/data_live", async (req, res) => {
     }
 
     // 4. คำนวณเครื่อง OFFLINE ที่แท้จริง (ทั้งหมด - ออนไลน์)
-    const mh_count = cachedMachineList.mhCount || 0;
+    const mh_count = cachedMachineList?.mhCount || 0;
     const real_offline = mh_count - mh_online;
 
     // 6. ส่งข้อมูลทั้งหมดกลับไป
@@ -350,7 +291,7 @@ app.get("/api/production/filter", async (req, res) => {
       });
     }
 
-    // --- เตรียมเงื่อนไข WHERE พื้นฐานสำหรับ CTE ---
+    // --- เตรียมเงื่อนไข WHERE พื้นฐาน ---
     let baseWhere = "WHERE 1=1";
     let cteParams = [];
     if (empId) {
@@ -362,42 +303,36 @@ app.get("/api/production/filter", async (req, res) => {
       cteParams.push(mhId);
     }
 
+    // --- เลือก Query ตามช่วงเวลา (อัปเดต ORDER BY Log_Timestamp, id แล้ว) ---
     if (daily) {
       try {
         query = `
-            WITH GroupedMax AS (
+            WITH OrderedLogs AS (
                 SELECT 
-                    Mh_ID, 
-                    Job_ID, 
-                    DATE_FORMAT(Log_Timestamp, '%Y-%m-%d %H:00:00') AS full_bucket, 
-                    DATE_FORMAT(Log_Timestamp, '%Y-%m-%d') AS log_date,
-                    MAX(OK) AS max_ok
+                    Mh_ID, Job_ID, Log_Timestamp, OK AS cumulative_count,
+                    LAG(OK) OVER (PARTITION BY Mh_ID, Job_ID ORDER BY Log_Timestamp, id) AS prev_count
                 FROM production_sum 
-                ${baseWhere}
+                ${baseWhere} 
                 AND DATE_FORMAT(Log_Timestamp, '%Y-%m-%d') = ?
-                GROUP BY Mh_ID, Job_ID, DATE_FORMAT(Log_Timestamp, '%Y-%m-%d %H:00:00'), DATE_FORMAT(Log_Timestamp, '%Y-%m-%d')
             ),
-            CalculatedDelta AS (
+            CalculatedDiff AS (
                 SELECT 
-                    full_bucket, 
-                    log_date,
-                    max_ok,
-                    -- เช็คว่า ถ้าแถวก่อนหน้าเป็นคนละวันกัน ให้ถือว่ายอดก่อนหน้าเป็น 0 ทันที (ไม่เอาข้ามวันมาลบ)
-                    CASE 
-                        WHEN LAG(log_date) OVER (PARTITION BY Mh_ID, Job_ID ORDER BY full_bucket) = log_date 
-                        THEN GREATEST(0, max_ok - LAG(max_ok) OVER (PARTITION BY Mh_ID, Job_ID ORDER BY full_bucket))
-                        ELSE max_ok -- ถ้าเป็นชั่วโมงแรกของวันใหม่ เอาค่า max_ok มาเป็นยอดผลิตจริงได้เลย
-                    END AS actual_ok
-                FROM GroupedMax
+                    Log_Timestamp,
+                    CASE
+                        WHEN prev_count IS NULL THEN cumulative_count
+                        WHEN cumulative_count < prev_count THEN cumulative_count
+                        ELSE cumulative_count - prev_count
+                    END AS actual_diff
+                FROM OrderedLogs
             )
             SELECT 
-                DATE_FORMAT(full_bucket, '%H:00') AS hour, 
-                SUM(actual_ok) AS ok
-            FROM CalculatedDelta
-            GROUP BY DATE_FORMAT(full_bucket, '%H:00')
+                DATE_FORMAT(Log_Timestamp, '%H:00') AS hour, 
+                SUM(actual_diff) AS ok
+            FROM CalculatedDiff
+            GROUP BY DATE_FORMAT(Log_Timestamp, '%H:00')
             ORDER BY hour;
         `;
-        params = [...cteParams, daily, daily, daily];
+        params = [...cteParams, daily];
       } catch (err) {
         console.error("Error constructing daily query:", err);
         return res.status(500).send("Server Error");
@@ -405,22 +340,29 @@ app.get("/api/production/filter", async (req, res) => {
     } else if (monthly) {
       try {
         query = `
-            WITH DailyMax AS (
+            WITH OrderedLogs AS (
                 SELECT 
-                    Mh_ID, 
-                    Job_ID, 
-                    DATE_FORMAT(Log_Timestamp, '%Y-%m-%d') AS log_date, 
-                    MAX(OK) AS max_ok
+                    Mh_ID, Job_ID, Log_Timestamp, OK AS cumulative_count,
+                    LAG(OK) OVER (PARTITION BY Mh_ID, Job_ID ORDER BY Log_Timestamp, id) AS prev_count
                 FROM production_sum 
-                ${baseWhere}
+                ${baseWhere} 
                 AND DATE_FORMAT(Log_Timestamp, '%Y-%m') = ?
-                GROUP BY Mh_ID, Job_ID, DATE_FORMAT(Log_Timestamp, '%Y-%m-%d')
+            ),
+            CalculatedDiff AS (
+                SELECT 
+                    Log_Timestamp,
+                    CASE
+                        WHEN prev_count IS NULL THEN cumulative_count
+                        WHEN cumulative_count < prev_count THEN cumulative_count
+                        ELSE cumulative_count - prev_count
+                    END AS actual_diff
+                FROM OrderedLogs
             )
             SELECT 
-                log_date, 
-                SUM(max_ok) AS ok
-            FROM DailyMax
-            GROUP BY log_date
+                DATE_FORMAT(Log_Timestamp, '%Y-%m-%d') AS log_date, 
+                SUM(actual_diff) AS ok
+            FROM CalculatedDiff
+            GROUP BY DATE_FORMAT(Log_Timestamp, '%Y-%m-%d')
             ORDER BY log_date;
         `;
         params = [...cteParams, monthly];
@@ -431,29 +373,29 @@ app.get("/api/production/filter", async (req, res) => {
     } else if (yearly) {
       try {
         query = `
-            WITH DailyMax AS (
+            WITH OrderedLogs AS (
                 SELECT 
-                    Mh_ID, 
-                    Job_ID, 
-                    DATE_FORMAT(Log_Timestamp, '%Y-%m-%d') AS log_date, 
-                    MAX(OK) AS max_ok
+                    Mh_ID, Job_ID, Log_Timestamp, OK AS cumulative_count,
+                    LAG(OK) OVER (PARTITION BY Mh_ID, Job_ID ORDER BY Log_Timestamp, id) AS prev_count
                 FROM production_sum 
-                ${baseWhere}
+                ${baseWhere} 
                 AND DATE_FORMAT(Log_Timestamp, '%Y') = ?
-                GROUP BY Mh_ID, Job_ID, DATE_FORMAT(Log_Timestamp, '%Y-%m-%d')
             ),
-            DailyTotal AS (
+            CalculatedDiff AS (
                 SELECT 
-                    log_date, 
-                    SUM(max_ok) AS daily_ok
-                FROM DailyMax
-                GROUP BY log_date
+                    Log_Timestamp,
+                    CASE
+                        WHEN prev_count IS NULL THEN cumulative_count
+                        WHEN cumulative_count < prev_count THEN cumulative_count
+                        ELSE cumulative_count - prev_count
+                    END AS actual_diff
+                FROM OrderedLogs
             )
             SELECT 
-                DATE_FORMAT(log_date, '%Y-%m') AS log_month, 
-                SUM(daily_ok) AS ok
-            FROM DailyTotal
-            GROUP BY DATE_FORMAT(log_date, '%Y-%m')
+                DATE_FORMAT(Log_Timestamp, '%Y-%m') AS log_month, 
+                SUM(actual_diff) AS ok
+            FROM CalculatedDiff
+            GROUP BY DATE_FORMAT(Log_Timestamp, '%Y-%m')
             ORDER BY log_month;
         `;
         params = [...cteParams, yearly];
@@ -464,28 +406,28 @@ app.get("/api/production/filter", async (req, res) => {
     } else if (All_year === "true") {
       try {
         query = `
-            WITH DailyMax AS (
+            WITH OrderedLogs AS (
                 SELECT 
-                    Mh_ID, 
-                    Job_ID, 
-                    DATE_FORMAT(Log_Timestamp, '%Y-%m-%d') AS log_date, 
-                    MAX(OK) AS max_ok
+                    Mh_ID, Job_ID, Log_Timestamp, OK AS cumulative_count,
+                    LAG(OK) OVER (PARTITION BY Mh_ID, Job_ID ORDER BY Log_Timestamp, id) AS prev_count
                 FROM production_sum 
                 ${baseWhere}
-                GROUP BY Mh_ID, Job_ID, DATE_FORMAT(Log_Timestamp, '%Y-%m-%d')
             ),
-            DailyTotal AS (
+            CalculatedDiff AS (
                 SELECT 
-                    log_date, 
-                    SUM(max_ok) AS daily_ok
-                FROM DailyMax
-                GROUP BY log_date
+                    Log_Timestamp,
+                    CASE
+                        WHEN prev_count IS NULL THEN cumulative_count
+                        WHEN cumulative_count < prev_count THEN cumulative_count
+                        ELSE cumulative_count - prev_count
+                    END AS actual_diff
+                FROM OrderedLogs
             )
             SELECT 
-                DATE_FORMAT(log_date, '%Y') AS log_year, 
-                SUM(daily_ok) AS ok
-            FROM DailyTotal
-            GROUP BY DATE_FORMAT(log_date, '%Y')
+                DATE_FORMAT(Log_Timestamp, '%Y') AS log_year, 
+                SUM(actual_diff) AS ok
+            FROM CalculatedDiff
+            GROUP BY DATE_FORMAT(Log_Timestamp, '%Y')
             ORDER BY log_year;
         `;
         params = [...cteParams];
@@ -499,7 +441,7 @@ app.get("/api/production/filter", async (req, res) => {
     const dataMap = {};
     let completeData = [];
 
-    // --- ส่วนการแมพข้อมูลให้ครบทุกช่วงเวลา (Data Mapping & Filling Gaps) ---
+    // --- ส่วนการแมพข้อมูลให้ครบทุกช่วงเวลา (Data Mapping) ---
     const allHours = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0") + ":00");
     const targetDate = daily || monthly || new Date().toISOString().slice(0, 7);
     const [yearStr, monthStr] = targetDate.split("-");
@@ -548,7 +490,7 @@ app.get("/api/production/filter", async (req, res) => {
 
       const allYears = Array.from(
         { length: currentYear - minYear + 1 },
-        (_, i) => String(minYear + i),
+        (_, i) => String(minYear + i)
       );
 
       rows.forEach((item) => {
@@ -563,10 +505,11 @@ app.get("/api/production/filter", async (req, res) => {
 
     res.json(completeData);
   } catch (err) {
-    console.error(err);
+    console.error("Route Error:", err);
     res.status(500).send("Server Error");
   }
 });
+
 // ดึงข้อมมูลรายชั่วโมง  http://localhost:5000/api/production/filter?&daily=2026-09-14
 // ดึงข้อมูลรายวัน      http://localhost:5000/api/production/filter?mhId=PU-42&monthly=2026-09
 // ดึงข้อมูลรายเดือน    http://localhost:5000/api/production/filter?&mhId=PU-42&yearly=2026
