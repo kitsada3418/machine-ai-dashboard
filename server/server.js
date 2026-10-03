@@ -643,9 +643,33 @@ app.get("/api/production/downtime", async (req, res) => {
 // http://localhost:5000/api/production/downtime?datetime=2026  showe ข้อมูลการหยุดทำงานของเครื่องจักรทั้งหมดของปี 2026
 
 const PORT = process.env.PORT || 5000;
-//app.listen(PORT, async () => {
-//    console.log(`Node.js Server running on http://localhost:${PORT}`);
-app.listen(PORT, async () => {
-  console.log(`Node.js Server running on http://localhost:${PORT}`);
-  setupMQTT();
+
+// ฟังก์ชันสำหรับรอให้ Database พร้อมทำงาน
+async function waitForDatabase() {
+  let isConnected = false;
+  
+  console.log('⏳ Checking database connection...');
+  
+  while (!isConnected) {
+    try {
+      // ลองเคาะประตูฐานข้อมูลด้วยคำสั่งง่ายๆ
+      await pool.query('SELECT 1'); 
+      console.log('✅ Database is Ready!');
+      isConnected = true;
+    } catch (error) {
+      // ถ้าเคาะแล้วไม่ตอบ (เช่น เจอ ECONNREFUSED) ให้รอ 3 วินาทีแล้วลองใหม่
+      console.error(`⚠️ Database not ready yet (${error.code}). Retrying in 3 seconds...`);
+      await new Promise(resolve => setTimeout(resolve, 3000)); 
+    }
+  }
+}
+
+// เริ่มการทำงาน: รอ DB พร้อม -> ค่อยเปิดพอร์ต API -> ค่อยเริ่ม MQTT
+waitForDatabase().then(() => {
+  app.listen(PORT, () => {
+    console.log(`🚀 Node.js Server running on http://localhost:${PORT}`);
+    
+    // เมื่อรัน API ผ่านแล้ว ค่อยให้ MQTT เริ่มทำงาน (เพื่อป้องกัน MQTT เรียกใช้ DB ตอนยังไม่พร้อม)
+    setupMQTT();
+  });
 });
