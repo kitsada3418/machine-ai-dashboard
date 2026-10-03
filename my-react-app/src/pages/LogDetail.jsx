@@ -4,7 +4,7 @@ import { apiFetch } from '../api';
 const getCurrentMonth = () => {
     const today = new Date();
     const year = today.getFullYear();
-    const month = String(today.getMonth() + 1).padStart(2, '0'); // เติม 0 ข้างหน้าถ้าเป็นเลขตัวเดียว
+    const month = String(today.getMonth() + 1).padStart(2, '0');
     return `${year}-${month}`;
 };
 
@@ -17,12 +17,11 @@ function LogDetail({ setCurrentPage, machineId }) {
   const [allLogs, setAllLogs] = useState([]);
   const [loading, setLoading] = useState(false);
   
-  // State สำหรับ Filters (ซ่อนช่อง Machine/Employee เพราะเราเจาะจงมาแล้ว)
-  const [filterDate, setFilterDate] = useState(getCurrentMonth()); // เริ่มต้นเป็นเดือนปัจจุบัน
+  // State สำหรับ Filters
+  const [filterDate, setFilterDate] = useState(getCurrentMonth());
   const [filterJob, setFilterJob] = useState('');
   
-  // State สำหรับ Pagination
-  const [currentPage, setCurrentPageNum] = useState(1);
+  const [pageNum, setPageNum] = useState(1);
   const itemsPerPage = 20;
 
   // ================= FETCH DATA =================
@@ -31,7 +30,6 @@ function LogDetail({ setCurrentPage, machineId }) {
     try {
       const queryParams = new URLSearchParams();
       
-      // ใส่พารามิเตอร์ตามประเภท
       if (isEmployee) {
         queryParams.append('empId', targetId);
       } else {
@@ -46,7 +44,7 @@ function LogDetail({ setCurrentPage, machineId }) {
       
       const result = await response.json();
       setAllLogs(result || []);
-      setCurrentPageNum(1); // รีเซ็ตหน้ากลับเป็นหน้า 1
+      setPageNum(1); // รีเซ็ตหน้ากลับเป็นหน้า 1
     } catch (error) {
       console.error('Error fetching logs:', error);
       setAllLogs([]);
@@ -74,7 +72,7 @@ function LogDetail({ setCurrentPage, machineId }) {
         const result = await response.json();
         if (!cancelled) {
           setAllLogs(result || []);
-          setCurrentPageNum(1);
+          setPageNum(1);
         }
       } catch (error) {
         console.error('Error fetching logs:', error);
@@ -89,7 +87,7 @@ function LogDetail({ setCurrentPage, machineId }) {
   }, [filterDate]);
 
   // ================= PAGINATION LOGIC =================
-  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfLastItem = pageNum * itemsPerPage;
   const indexOfFirstItem = indexOfLastItem - itemsPerPage;
   const currentLogs = allLogs.slice(indexOfFirstItem, indexOfLastItem);
   const totalPages = Math.ceil(allLogs.length / itemsPerPage) || 1;
@@ -145,13 +143,16 @@ function LogDetail({ setCurrentPage, machineId }) {
       <div className="card border-2 rounded-4 shadow-sm bg-white">
         <div className="card-body p-0">
           <div className="table-responsive">
-            <table className="table table-hover table-striped align-middle mb-0" style={{ fontSize: '0.9rem' }}>
+            <table className="table table-hover table-striped align-middle mb-0" style={{ fontSize: '0.85rem' }}>
               <thead className="table-dark">
                 <tr className="text-center">
                   <th>DATE</th>
                   <th>{isEmployee ? 'Machine' : 'Employee'}</th>
                   <th>Job ID</th>
                   <th>Customer</th>
+                  <th>Terminal</th>
+                  <th>Confirm Start</th>
+                  <th>Confirm End</th>
                   <th>Order Qty</th>
                   <th>OK</th>
                   <th>NG</th>
@@ -161,14 +162,14 @@ function LogDetail({ setCurrentPage, machineId }) {
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan="8" className="text-center py-5">
+                    <td colSpan="11" className="text-center py-5">
                       <div className="spinner-border text-primary" role="status"></div>
                       <div className="mt-2 text-muted fw-bold">Loading Data...</div>
                     </td>
                   </tr>
                 ) : currentLogs.length === 0 ? (
                   <tr>
-                    <td colSpan="8" className="text-center py-5 text-muted fw-bold">
+                    <td colSpan="11" className="text-center py-5 text-muted fw-bold">
                       🚫 ไม่พบข้อมูลบันทึกการผลิต
                     </td>
                   </tr>
@@ -177,13 +178,18 @@ function LogDetail({ setCurrentPage, machineId }) {
                     <tr key={index} className="text-center">
                       <td className="text-nowrap">{new Date(log.Start_Time).toLocaleDateString('en-GB', { timeZone: 'Asia/Bangkok' })}</td>
                       
-                      {/* สลับแสดงคอลัมน์ ถ้าค้นหาพนักงานให้โชว์เครื่องที่ทำ, ถ้าค้นหาเครื่องให้โชว์พนักงานที่ทำ */}
                       <td className="fw-bold">{isEmployee ? log.Mh_ID : log.Emp_ID}</td>
                       
-                      <td className="text-muted fw-bold">{log.job_id}</td>
-                      <td className="text-truncate" style={{ maxWidth: '150px' }} title={log.Cust_Name}>
+                      <td className="text-muted fw-bold">{log.Job_ID}</td>
+                      <td className="text-truncate" style={{ maxWidth: '120px' }} title={log.Cust_Name}>
                         {log.Cust_Name || '-'}
                       </td>
+                      
+                      {/* เพิ่มคอลัมน์ Terminal, Confirm Start และ Confirm End */}
+                      <td><span className="badge bg-light text-dark border">{log.T_Name || '-'}</span></td>
+                      <td className="text-secondary">{log.ConfirmStart_ID || '-'}</td>
+                      <td className="text-secondary">{log.ConfirmEnd_ID || '-'}</td>
+
                       <td>{log.order_qty || 0}</td>
                       <td className="text-success fw-bold">{log.OK || 0}</td>
                       <td className="text-danger fw-bold">{log.NG || 0}</td>
@@ -209,18 +215,18 @@ function LogDetail({ setCurrentPage, machineId }) {
             <div className="btn-group">
               <button 
                 className="btn btn-outline-secondary btn-sm fw-bold" 
-                disabled={currentPage === 1}
-                onClick={() => setCurrentPageNum(prev => Math.max(prev - 1, 1))}
+                disabled={pageNum === 1}
+                onClick={() => setPageNum(prev => Math.max(prev - 1, 1))}
               >
                 ◀ Prev
               </button>
               <span className="btn btn-secondary btn-sm disabled text-white fw-bold">
-                {currentPage} / {totalPages}
+                {pageNum} / {totalPages}
               </span>
               <button 
                 className="btn btn-outline-secondary btn-sm fw-bold" 
-                disabled={currentPage === totalPages}
-                onClick={() => setCurrentPageNum(prev => Math.min(prev + 1, totalPages))}
+                disabled={pageNum === totalPages}
+                onClick={() => setPageNum(prev => Math.min(prev + 1, totalPages))}
               >
                 Next ▶
               </button>

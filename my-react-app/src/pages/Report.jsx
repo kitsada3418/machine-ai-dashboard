@@ -1,296 +1,350 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { apiFetch } from '../api';
 
-function Report() {
-  // ================= STATE =================
-  const [reportType, setReportType] = useState('daily'); // 'daily', 'monthly', 'summary'
+function EmployeeMachineReport() {
   const [reportDate, setReportDate] = useState(new Date().toISOString().split('T')[0]);
-  const [filterTarget, setFilterTarget] = useState('all'); // เลือกพนักงานเฉพาะเจาะจง
   
-  // Options สำหรับ Dropdown
+  const [startHour, setStartHour] = useState('07');
+  const [endHour, setEndHour] = useState('22');
+  
+  const [filterEmp, setFilterEmp] = useState('all');
+  const [filterMachine, setFilterMachine] = useState('all');
+  
   const [employeeOptions, setEmployeeOptions] = useState([]);
+  const [machineOptions, setMachineOptions] = useState([]);
+  
+  // 📌 State สำหรับเก็บ Map ชื่อพนักงาน
+  const [employeeNamesMap, setEmployeeNamesMap] = useState({});
 
   const [reportData, setReportData] = useState([]);
-  const [summaryData, setSummaryData] = useState({ 
-    totalEmployees: 0, 
-    totalJobs: 0, 
-    totalOk: 0,
-    totalDowntimeMins: 0 
-  });
   const [loading, setLoading] = useState(false);
 
+  // 📌 State สำหรับเก็บ ID ของแถวที่ถูกคลิกเลือก (เพื่อทำไฮไลต์)
+  const [selectedRow, setSelectedRow] = useState(null);
+
+  const getHoursRange = (start, end) => {
+    const s = parseInt(start, 10);
+    const e = parseInt(end, 10);
+    let list = [];
+    for (let i = s; i <= e; i++) {
+      list.push(String(i).padStart(2, '0'));
+    }
+    return list;
+  };
+
+  const hoursList = getHoursRange(startHour, endHour);
+
+  // 1. ดึงข้อมูลตัวเลือก Dropdown และ "ชื่อพนักงาน"
   useEffect(() => {
     let cancelled = false;
-    const run = async () => {
+    const fetchOptions = async () => {
       try {
-        const empRes = await apiFetch('/api/production/selectData?empId_All=true');
+        const [empRes, mhRes, empDetailRes] = await Promise.all([
+          apiFetch('/api/production/selectData?empId_All=true'),
+          apiFetch('/api/production/selectData?mhId_All=true'),
+          apiFetch('/api/production/selectData?emp_detail=true')
+        ]);
+        
         const empRaw = await empRes.json();
+        const mhRaw = await mhRes.json();
+        const empDetailRaw = await empDetailRes.ok ? await empDetailRes.json() : [];
+        
         if (cancelled) return;
-        const empData = Array.isArray(empRaw) ? empRaw : [];
-        setEmployeeOptions(empData.map(item => item.Emp_ID || item.emp_id || Object.values(item)[0]));
+
+        setEmployeeOptions(Array.isArray(empRaw) ? empRaw.map(item => item.Emp_ID) : []);
+        setMachineOptions(Array.isArray(mhRaw) ? mhRaw.map(item => item.Mh_ID) : []);
+
+        const nameMap = {};
+        if (Array.isArray(empDetailRaw)) {
+          empDetailRaw.forEach(item => {
+            const id = item.Emp_ID || item.emp_id;
+            const name = item.Emp_Name || item.emp_name || item.Name || item.name || '';
+            if (id) nameMap[String(id).trim()] = name;
+          });
+        }
+        setEmployeeNamesMap(nameMap);
+
       } catch (error) {
-        console.error('Error fetching dropdown options:', error);
+        console.error('Error fetching filter options:', error);
       }
     };
-    run();
+    fetchOptions();
     return () => { cancelled = true; };
   }, []);
 
-  // ================= FETCH DATA & PROCESS =================
-  async function generateReport() {
+  // 2. ดึงข้อมูลตารางการผลิต
+  const fetchReportData = async () => {
     setLoading(true);
+    // รีเซ็ตการเลือกแถวเมื่อค้นหาข้อมูลใหม่
+    setSelectedRow(null); 
     try {
-      // 1. จัดฟอร์แมตวันที่ตาม Report Type
-      let formattedDate = reportDate;
-      if (reportType === 'monthly') formattedDate = reportDate.slice(0, 7); // YYYY-MM
-      if (reportType === 'summary') formattedDate = reportDate.slice(0, 4); // YYYY
+      const response = await apiFetch(`/api/datalog?date=${reportDate}`);
+      if (!response.ok) throw new Error('Failed to fetch data');
+      
+      const rawData = await response.json();
+      const data = Array.isArray(rawData) ? rawData : [];
 
-      const queryParams = new URLSearchParams();
-      queryParams.append('date', formattedDate);
-      if (filterTarget !== 'all') {
-        queryParams.append('empId', filterTarget);
-      }
+      const grouped = {};
 
-      // 2. ดึงข้อมูลจาก API (สมมติว่า API ดึงข้อมูล log + downtime มาให้แล้ว)
-      const response = await apiFetch(`/api/datalog?${queryParams.toString()}`);
-      if (!response.ok) throw new Error('Failed to fetch report data');
-      const dataRaw = await response.json();
-      const data = Array.isArray(dataRaw) ? dataRaw : [];
-
-      const groupedData = {};
-      const allUniqueJobs = new Set();
-      let totalOverallOk = 0;
-      let totalOverallDowntime = 0;
-
-      // 3. วนลูปจัดกลุ่มข้อมูลตามพนักงาน (Emp_ID)
       data.forEach(item => {
-        const empId = item.Emp_ID || 'Unknown';
+        const empId = item.Emp_ID;
+        if (!empId) return;
 
-        if (!groupedData[empId]) {
-          groupedData[empId] = { 
-            empId: empId, 
-            jobs: new Set(), 
-            ok: 0, 
-            workHours: 0, // ชั่วโมงการทำงานรวม
-            downtimeCount: 0, // จำนวนครั้งที่หลุด
-            downtimeMins: 0 // นาทีที่หลุดรวม
+        const mhId = item.Mh_ID || '-';
+        const start = item.Start_Time ? new Date(item.Start_Time) : null;
+        const hour = start ? String(start.getHours()).padStart(2, '0') : null;
+        const okVal = Number(item.OK) || 0;
+
+        if (!hour || hour < startHour || hour > endHour) return;
+
+        if (!grouped[empId]) {
+          grouped[empId] = {
+            empId: empId,
+            machinesSet: new Set(),
+            hourlyData: {},
+            totalOk: 0
           };
         }
-        
-        // เพิ่ม Job เข้า Set เพื่อใช้นับจำนวนจ็อบที่ไม่ซ้ำกัน
-        if (item.Job_ID) {
-            groupedData[empId].jobs.add(item.Job_ID);
-            allUniqueJobs.add(item.Job_ID);
+
+        grouped[empId].machinesSet.add(mhId);
+        grouped[empId].hourlyData[hour] = (grouped[empId].hourlyData[hour] || 0) + okVal;
+        grouped[empId].totalOk += okVal;
+      });
+
+      let finalArray = Object.values(grouped).map((group, index) => ({
+        id: index + 1,
+        empId: group.empId,
+        machines: Array.from(group.machinesSet).join(', '),
+        machineList: Array.from(group.machinesSet),
+        machineCount: group.machinesSet.size,
+        hourlyData: group.hourlyData,
+        totalOk: group.totalOk
+      }));
+
+      if (filterEmp !== 'all') {
+        finalArray = finalArray.filter(item => item.empId === filterEmp);
+      }
+      if (filterMachine !== 'all') {
+        finalArray = finalArray.filter(item => item.machineList.includes(filterMachine));
+      }
+
+      finalArray.sort((a, b) => {
+        if (b.machineCount !== a.machineCount) {
+          return b.machineCount - a.machineCount;
         }
-        
-        groupedData[empId].ok += Number(item.OK) || 0;
-        
-        // *หมายเหตุ: ต้องแน่ใจว่า API ส่งค่า Work_Hours, Downtime_Count, Downtime_Mins มาให้ด้วย
-        groupedData[empId].workHours += Number(item.Work_Hours) || 1; // สมมติว่า 1 log = 1 ชั่วโมง
-        groupedData[empId].downtimeCount += Number(item.Downtime_Count) || 0;
-        groupedData[empId].downtimeMins += Number(item.Downtime_Mins) || 0;
-        
-        totalOverallOk += Number(item.OK) || 0;
-        totalOverallDowntime += Number(item.Downtime_Mins) || 0;
+        return b.totalOk - a.totalOk;
       });
 
-      // 4. แปลงข้อมูลและคำนวณค่าเฉลี่ย
-      let finalArray = Object.values(groupedData).map((group, index) => {
-        const jobCount = group.jobs.size;
-        const avgPerHour = group.workHours > 0 ? (group.ok / group.workHours) : group.ok;
-
-        let status = 'Normal';
-        if (group.downtimeCount >= 3 || group.downtimeMins >= 60) status = 'Warning'; // หลุดบ่อย หรือ นานเกิน 1 ชม.
-        if (jobCount === 0 && group.ok === 0) status = 'No Data';
-
-        return {
-          id: index + 1,
-          empId: group.empId,
-          jobCount: jobCount,
-          totalOk: group.ok,
-          avgPerHour: Math.round(avgPerHour), // ปัดเศษ
-          downtimeCount: group.downtimeCount,
-          downtimeMins: group.downtimeMins,
-          status: status
-        };
-      });
-
-      // 5. จัดเรียงตามยอดผลิตรวมจากมากไปน้อย
-      finalArray.sort((a, b) => b.totalOk - a.totalOk);
-      // กรองเฉพาะคนที่มีการทำงาน
-      finalArray = finalArray.filter(item => item.totalOk > 0 || item.jobCount > 0);
-      finalArray.forEach((item, i) => item.id = i + 1); // รัน ID ใหม่
-
-      // 6. อัปเดต Summary
+      finalArray.forEach((item, i) => item.id = i + 1);
       setReportData(finalArray);
-      setSummaryData({
-        totalEmployees: finalArray.length,
-        totalJobs: allUniqueJobs.size,
-        totalOk: totalOverallOk,
-        totalDowntimeMins: totalOverallDowntime
-      });
-
     } catch (error) {
-      console.error('Error generating report:', error);
+      console.error('Error loading report:', error);
       setReportData([]);
-      setSummaryData({ totalEmployees: 0, totalJobs: 0, totalOk: 0, totalDowntimeMins: 0 });
     } finally {
       setLoading(false);
     }
-  }
-
-  useEffect(() => {
-    let cancelled = false;
-    const run = async () => {
-      await generateReport();
-      if (cancelled) return;
-    };
-    run();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const handleExport = (format) => {
-    alert(`กำลังเตรียมดาวน์โหลดรายงานพนักงานรูปแบบ .${format.toUpperCase()} ...`);
   };
 
-  return (
-    <div className="animate__animated animate__fadeIn container-fluid p-4">
-      
-      {/* ================= HEADER ================= */}
-      <div className="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center mb-4 gap-3">
-        <div>
-          <h2 className="fw-bold mb-1" style={{ color: 'var(--text-primary)' }}>👷 Employee Performance Report</h2>
-          <span className="text-muted fs-6">
-            รายงานสรุปประสิทธิภาพการทำงานของพนักงาน และสถิติการขัดข้อง
-          </span>
-        </div>
+  useEffect(() => {
+    fetchReportData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportDate, startHour, endHour]);
 
-        <div className="d-flex align-items-center gap-2">
-          <button className="btn btn-outline-success fw-bold px-3 rounded-pill shadow-sm" onClick={() => handleExport('excel')}>
-            <i className="bi bi-file-earmark-excel-fill me-1"></i> Export Excel
-          </button>
+  // 3. Export เป็น Excel
+  const handleExport = () => {
+    if (reportData.length === 0) {
+      alert("ไม่มีข้อมูลสำหรับ Export");
+      return;
+    }
+
+    let csvContent = "data:text/csv;charset=utf-8,\uFEFF";
+    
+    let headers = ["ลำดับ", "รหัสพนักงาน", "ชื่อพนักงาน", "เครื่องจักร", "รวม (OK)"];
+    hoursList.forEach(h => headers.push(`${parseInt(h, 10)}.00`));
+    csvContent += headers.join(",") + "\n";
+
+    reportData.forEach(item => {
+      const cleanEmpId = String(item.empId).trim();
+      const currentEmpName = employeeNamesMap[cleanEmpId] || '-';
+
+      let row = [
+        item.id,
+        item.empId,
+        currentEmpName,
+        `"${item.machines || '-'}"`,
+        item.totalOk
+      ];
+      
+      hoursList.forEach(h => {
+        row.push(item.hourlyData[h] || 0);
+      });
+      
+      csvContent += row.join(",") + "\n";
+    });
+
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `Employee_Hourly_Report_${reportDate}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const allHoursDropdown = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
+
+  return (
+    <div className="container-fluid p-3">
+      
+      {/* HEADER & EXPORT BUTTON */}
+      <div className="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-3 gap-2">
+        <div>
+          <h4 className="fw-bold mb-1">👷 สรุปยอดผลิตรายชั่วโมงตามช่วงเวลา</h4>
+          <span className="text-muted small">คลิกที่แถวเพื่อไฮไลต์ข้อมูล จัดเรียงตามจำนวนเครื่องจักรเป็นหลัก</span>
         </div>
+        <button 
+          className="btn btn-outline-success fw-bold px-3 rounded-pill shadow-sm" 
+          onClick={handleExport}
+          disabled={loading || reportData.length === 0}
+        >
+          <i className="bi bi-file-earmark-excel-fill me-1"></i> Export Excel
+        </button>
       </div>
 
-      {/* ================= FILTER BAR ================= */}
-      <div className="card p-3 mb-4 border-2 rounded-4 shadow-sm bg-white">
-        <div className="row g-3 align-items-end">
-          <div className="col-md-3">
-            <label className="form-label text-muted fw-bold small">REPORT PERIOD</label>
-            <select className="form-select border-2 fw-bold" value={reportType} onChange={(e) => setReportType(e.target.value)}>
-              <option value="daily">Daily (รายวัน)</option>
-              <option value="monthly">Monthly (รายเดือน)</option>
-            </select>
-          </div>
+      {/* FILTER BAR */}
+      <div className="card p-3 mb-3 border-2 rounded-4 shadow-sm bg-white">
+        <div className="row g-2 align-items-end">
           
-          <div className="col-md-3">
-            <label className="form-label text-muted fw-bold small">EMPLOYEE (พนักงาน)</label>
-            <select className="form-select border-2 fw-bold text-primary" value={filterTarget} onChange={(e) => setFilterTarget(e.target.value)}>
-              <option value="all">All Employees (ทุกคน)</option>
-              {employeeOptions.map((emp, idx) => <option key={idx} value={emp}>Emp: {emp}</option>)}
-            </select>
-          </div>
-
-          <div className="col-md-3">
-            <label className="form-label text-muted fw-bold small">SELECT DATE</label>
+          <div className="col-md-2">
+            <label className="form-label text-muted fw-bold" style={{ fontSize: '0.75rem' }}>เลือกวันที่</label>
             <input 
-              type={reportType === 'monthly' ? "month" : "date"}
-              className="form-control border-2 fw-bold" 
-              value={reportType === 'monthly' ? reportDate.slice(0,7) : reportDate} 
+              type="date" 
+              className="form-control form-control-sm fw-bold border-2" 
+              value={reportDate} 
               onChange={(e) => setReportDate(e.target.value)} 
             />
           </div>
-          <div className="col-md-3">
-            <button className="btn btn-primary w-100 fw-bold py-2 rounded-3 shadow-sm" onClick={generateReport}>
-              <i className="bi bi-search me-1"></i> ค้นหาข้อมูล
+
+          <div className="col-md-2">
+            <label className="form-label text-muted fw-bold" style={{ fontSize: '0.75rem' }}>ตั้งแต่เวลา (Start)</label>
+            <select className="form-select form-select-sm fw-bold border-2" value={startHour} onChange={(e) => setStartHour(e.target.value)}>
+              {allHoursDropdown.map(h => <option key={h} value={h}>{h}:00 น.</option>)}
+            </select>
+          </div>
+
+          <div className="col-md-2">
+            <label className="form-label text-muted fw-bold" style={{ fontSize: '0.75rem' }}>ถึงเวลา (End)</label>
+            <select className="form-select form-select-sm fw-bold border-2" value={endHour} onChange={(e) => setEndHour(e.target.value)}>
+              {allHoursDropdown.map(h => <option key={h} value={h}>{h}:00 น.</option>)}
+            </select>
+          </div>
+
+          <div className="col-md-2">
+            <label className="form-label text-muted fw-bold" style={{ fontSize: '0.75rem' }}>พนักงาน</label>
+            <select className="form-select form-select-sm fw-bold border-2" value={filterEmp} onChange={(e) => setFilterEmp(e.target.value)}>
+              <option value="all">ทุกคน</option>
+              {employeeOptions.map((emp, idx) => <option key={idx} value={emp}>{emp}</option>)}
+            </select>
+          </div>
+
+          <div className="col-md-2">
+            <label className="form-label text-muted fw-bold" style={{ fontSize: '0.75rem' }}>เครื่องจักร</label>
+            <select className="form-select form-select-sm fw-bold border-2" value={filterMachine} onChange={(e) => setFilterMachine(e.target.value)}>
+              <option value="all">ทุกเครื่อง</option>
+              {machineOptions.map((mh, idx) => <option key={idx} value={mh}>{mh}</option>)}
+            </select>
+          </div>
+
+          <div className="col-md-2">
+            <button className="btn btn-primary btn-sm w-100 fw-bold py-1" onClick={fetchReportData} disabled={loading}>
+              <i className="bi bi-search me-1"></i> ค้นหา
             </button>
           </div>
+
         </div>
       </div>
 
-      {/* ================= SUMMARY CARDS ================= */}
-      <div className="row g-4 mb-4">
-        <div className="col-md-3">
-          <div className="card border-2 rounded-4 p-3 shadow-sm text-center bg-white h-100">
-            <span className="text-muted small fw-bold">พนักงานที่ขึ้นงาน</span>
-            <h2 className="fw-bold text-primary my-2">{summaryData.totalEmployees} <span className="fs-6 text-muted">คน</span></h2>
-          </div>
-        </div>
-        <div className="col-md-3">
-          <div className="card border-2 rounded-4 p-3 shadow-sm text-center bg-white h-100">
-            <span className="text-muted small fw-bold">จำนวนจ็อบทั้งหมด</span>
-            <h2 className="fw-bold text-success my-2">{summaryData.totalJobs} <span className="fs-6 text-muted">จ็อบ</span></h2>
-          </div>
-        </div>
-        <div className="col-md-3">
-          <div className="card border-2 rounded-4 p-3 shadow-sm text-center bg-white h-100">
-            <span className="text-muted small fw-bold">ยอดผลิตรวม (OK)</span>
-            <h2 className="fw-bold text-info my-2">{summaryData.totalOk.toLocaleString()} <span className="fs-6 text-muted">ชิ้น</span></h2>
-          </div>
-        </div>
-        <div className="col-md-3">
-          <div className="card border-2 rounded-4 p-3 shadow-sm text-center bg-white h-100">
-            <span className="text-muted small fw-bold">เวลาขัดข้องสะสม (Downtime)</span>
-            <h2 className={`fw-bold my-2 ${summaryData.totalDowntimeMins > 0 ? 'text-danger' : 'text-secondary'}`}>
-              {summaryData.totalDowntimeMins} <span className="fs-6 text-muted">นาที</span>
-            </h2>
-          </div>
-        </div>
-      </div>
-
-      {/* ================= REPORT TABLE ================= */}
+      {/* TABLE */}
       <div className="card border-2 rounded-4 shadow-sm bg-white">
-        <div className="card-header bg-white py-3 border-bottom d-flex justify-content-between align-items-center">
-          <strong className="text-primary fs-5">
-            <i className="bi bi-person-lines-fill me-2"></i> สถิติการทำงานรายบุคคล
-          </strong>
-        </div>
-        <div className="table-responsive">
-          <table className="table table-hover mb-0 align-middle text-center">
-            <thead className="table-light">
-              <tr className="text-secondary small">
-                <th>#</th>
-                <th>รหัสพนักงาน</th>
-                <th>จำนวนจ็อบ</th>
-                <th>ยอดผลิต (ชิ้น)</th>
-                <th>เฉลี่ยต่อชั่วโมง</th>
-                <th className="text-danger">หลุดกี่รอบ</th>
-                <th className="text-danger">รวมเวลาหลุด (นาที)</th>
-                <th>สถานะ</th>
+        <div className="table-responsive" style={{ maxHeight: '68vh' }}>
+          <table className="table table-bordered table-striped table-hover mb-0 align-middle text-center" style={{ fontSize: '0.85rem' }}>
+            <thead className="table-dark sticky-top">
+              <tr>
+                <th style={{ width: '45px' }}>#</th>
+                <th className="text-start ps-3" style={{ width: '160px' }}>พนักงาน</th>
+                <th style={{ width: '160px' }}>เครื่องจักร</th>
+                <th style={{ width: '80px' }}>รวม</th>
+                {hoursList.map(h => (
+                  <th key={h} style={{ minWidth: '55px', padding: '8px 4px' }}>
+                    {parseInt(h, 10)}.00
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="8" className="text-center py-5">
-                    <div className="spinner-border text-primary" role="status"></div>
-                    <div className="mt-2 text-muted fw-bold">กำลังประมวลผลข้อมูล...</div>
+                  <td colSpan={4 + hoursList.length} className="py-5">
+                    <div className="spinner-border spinner-border-sm text-primary" role="status"></div>
+                    <div className="mt-2 text-muted fw-bold" style={{ fontSize: '0.85rem' }}>กำลังประมวลผลข้อมูล...</div>
                   </td>
                 </tr>
               ) : reportData.length === 0 ? (
                 <tr>
-                  <td colSpan="8" className="text-center py-5 text-muted fw-bold">
-                    📭 ไม่มีข้อมูลการปฏิบัติงานในวันที่เลือก
+                  <td colSpan={4 + hoursList.length} className="py-5 text-muted fw-bold">
+                    📭 ไม่พบข้อมูลการผลิตตามเงื่อนไขที่เลือก
                   </td>
                 </tr>
               ) : (
-                reportData.map((item) => (
-                  <tr key={item.id}>
-                    <td className="fw-bold text-muted">{item.id}</td>
-                    <td className="fw-bold text-primary fs-6">{item.empId}</td>
-                    <td className="fw-bold text-dark">{item.jobCount} <span className="small text-muted fw-normal">Jobs</span></td>
-                    <td className="fw-bold text-success">{item.totalOk.toLocaleString()}</td>
-                    <td className="fw-bold text-info">{item.avgPerHour.toLocaleString()} <span className="small text-muted fw-normal">/hr</span></td>
-                    <td className="fw-bold text-danger">{item.downtimeCount}</td>
-                    <td className="fw-bold text-danger">{item.downtimeMins} <span className="small fw-normal">m</span></td>
-                    <td>
-                      <span className={`badge px-3 py-2 ${item.status === 'Normal' ? 'bg-success' : 'bg-warning text-dark'}`}>
-                        {item.status === 'Normal' ? 'ปกติ' : 'ต้องตรวจสอบ'}
-                      </span>
-                    </td>
-                  </tr>
-                ))
+                reportData.map((item) => {
+                  // เช็คว่าแถวนี้กำลังถูกคลิกเลือกอยู่หรือไม่
+                  const isSelected = selectedRow === item.id;
+                  
+                  return (
+                    <tr 
+                      key={item.id} 
+                      onClick={() => setSelectedRow(isSelected ? null : item.id)} // คลิกซ้ำเพื่อยกเลิก
+                      className={isSelected ? "table-primary border-primary" : ""} // เปลี่ยนสีพื้นหลังเป็นสีฟ้าทึบถ้าถูกเลือก
+                      style={{ cursor: "pointer", transition: "background-color 0.2s" }} // เปลี่ยนเมาส์เป็นรูปนิ้วมือ
+                    >
+                      <td className="fw-bold text-muted">{item.id}</td>
+                      
+                      <td className="text-start ps-3">
+                        <div className="fw-bold text-primary">{item.empId}</div>
+                        {employeeNamesMap[String(item.empId).trim()] && (
+                          <div className="text-muted" style={{ fontSize: '0.75rem' }}>
+                            {employeeNamesMap[String(item.empId).trim()]}
+                          </div>
+                        )}
+                      </td>
+
+                      <td>
+                        <span className="badge bg-light text-dark border px-2 py-1" style={{ fontSize: '0.75rem' }}>
+                          {item.machines || '-'}
+                        </span>
+                      </td>
+                      
+                      {/* เมื่อถูกคลิก สีพื้นหลังจะเป็นไปตาม table-primary เลยไม่บังคับใส่สีเขียวค้างไว้ */}
+                      <td className="fw-bold text-success fs-6" style={!isSelected ? { backgroundColor: '#f0fdf4' } : {}}>
+                        {item.totalOk.toLocaleString()}
+                      </td>
+                      
+                      {hoursList.map(h => {
+                        const val = item.hourlyData[h];
+                        return (
+                          <td 
+                            key={h} 
+                            // ถ้าแถวถูกไฮไลต์ ตัวอักษรสีจะเข้มขึ้นทั้งหมดเพื่อให้อ่านง่าย
+                            className={val ? "fw-bold text-primary" : (isSelected ? "text-primary opacity-75" : "text-black-50 opacity-50")} 
+                            style={{ padding: '8px 4px' }}
+                          >
+                            {val ? val.toLocaleString() : '-'}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -301,4 +355,4 @@ function Report() {
   );
 }
 
-export default Report;
+export default EmployeeMachineReport;

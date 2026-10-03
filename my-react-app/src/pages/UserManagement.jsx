@@ -15,9 +15,9 @@ function UserManagement() {
     { id: 'supervisor', label: 'Supervisor View' },
     { id: 'manager', label: 'File & Settings Manager' },
     { id: 'oee', label: 'OEE Dashboard' },
-    // 📌 เพิ่ม 2 บรรทัดนี้เข้าไปให้ตรงกับ App.js
     { id: 'user_management', label: 'User Management' },
-    { id: 'system_logs', label: 'System Logs' }
+    { id: 'system_logs', label: 'System Logs' },
+    { id: 'employee_management', label: 'Employee Management' } // 📌 เพิ่ม 2 บรรทัดนี้เข้าไปให้ตรงกับ App.js
   ];
 
   const [roles, setRoles] = useState([]);

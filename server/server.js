@@ -1,6 +1,9 @@
 // โหลดค่าจากไฟล์ .env ไว้บรรทัดแรกสุด
 require("dotenv").config();
 
+const fs = require('fs');
+const path = require('path');
+
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
@@ -24,6 +27,13 @@ app.use(express.json());
 app.use("/api", userRoutes);
 //app.use("/api", authenticateToken);
 // เก็บ Cache แยกตาม Mh_ID
+
+
+// สร้างโฟลเดอร์ UpdateFiles แบบเดียวกับ Flask
+const UPLOAD_FOLDER = path.join(__dirname, 'UpdateFiles');
+if (!fs.existsSync(UPLOAD_FOLDER)) {
+    fs.mkdirSync(UPLOAD_FOLDER, { recursive: true });
+}
 
 
 async function getMasterDataSummary(mhId_All, empId_All, mh_count, emp_count) {
@@ -77,7 +87,7 @@ app.get("/api/data_live", async (req, res) => {
       cachedMachineList = summaryResult || {};
     }
 
-// 2. ประกาศตัวแปรเก็บยอดสรุป
+    // 2. ประกาศตัวแปรเก็บยอดสรุป
     let mh_run = 0;
     let mh_stop = 0;
     let sumTotalDay = 0;
@@ -90,7 +100,7 @@ app.get("/api/data_live", async (req, res) => {
       // นับสถานะเครื่องที่ออนไลน์และส่งข้อมูลเข้ามาแล้ว
       if (item.status === "RUN") mh_run++;
       else if (item.status === "STOP") mh_stop++;
-      
+
       // นับว่ามีเครื่องออนไลน์รวมกี่เครื่อง
       if (item.status !== "OFFLINE") mh_online++;
     }
@@ -118,47 +128,18 @@ app.get("/api/data_live", async (req, res) => {
 
 
 
-app.get("/api/production/selectData", async (req, res) => {
-  try {
-    const { mhId_All, empId_All, mh_count, emp_count } = req.query;
-    let query = "";
-
-    if (mhId_All === "true") {
-      query += ` SELECT Mh_ID from Machine ORDER BY Mh_ID ASC `;
-    }
-    if (empId_All === "true") {
-      if (query) query += ` UNION `;
-      query += ` SELECT Emp_ID from Emp ORDER BY Emp_ID ASC `;
-    }
-    if (mh_count === "true") {
-      if (query) query += ` UNION `;
-      query += ` SELECT COUNT(DISTINCT Mh_ID) AS mh_count from Machine `;
-    }
-    if (emp_count === "true") {
-      if (query) query += ` UNION `;
-      query += ` SELECT COUNT(DISTINCT Emp_ID) AS emp_count from Emp `;
-    }
-
-    if (!query) {
-      return res
-        .status(400)
-        .json({ message: "ต้องระบุเงื่อนไขการ query อย่างน้อยหนึ่งรายการ" });
-    }
-
-    const [rows] = await pool.query(query);
-    res.json(rows);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Server Error");
-  }
-});
-//ดึงข้อมูลการผลิตแบบ Real-time จาก MQTT Broker
-
 // http://localhost:5000/api/data_live
 
 app.get("/api/production/selectData", async (req, res) => {
   try {
-    const { mhId_All, empId_All, mh_count, emp_count } = req.query;
+    // 1. เพิ่ม emp_detail เข้ามาในบรรทัดนี้ด้วย
+    const { mhId_All, empId_All, mh_count, emp_count, emp_detail } = req.query;
+
+    // 2. ดักดึงชื่อพนักงาน
+    if (emp_detail === "true") {
+      const [rows] = await pool.query(`SELECT Emp_ID, Emp_Name FROM Emp ORDER BY Emp_ID ASC`);
+      return res.json(rows);
+    }
     let query = "";
 
     if (mhId_All === "true") {
@@ -206,35 +187,53 @@ app.get("/api/production/selectData", async (req, res) => {
 // http://localhost:5000/api/production/selectData?empId_All=true  showe รายชื่อพนักงานทั้งหมด
 // http://localhost:5000/api/production/selectData?mh_count=true   showe จำนวนเครื่องจักรทั้งหมด
 // http://localhost:5000/api/production/selectData?emp_count=true  showe จำนวนพนักงานทั้งหมด
+// http://localhost:5000/api/production/selectData?emp_detail=true  showe รายชื่อพนักงานพร้อมชื่อจริง
 
 // ดึงข้อมูลการผลิตของเครื่องจักรตาม Mh_ID
 
+// ดึงข้อมูลการผลิตของเครื่องจักรตาม Mh_ID
 app.get("/api/datalog", async (req, res) => {
   try {
     const { mhId, empId, date, jobId } = req.query;
 
     let query = `SELECT 
-                            p.Start_Time,
-                            job_id,
-                            p.Mh_ID,
-                            p.Emp_ID,
-                            c.Cust_Name,
-                            ts.T_Name,
-                            p.End_Time,
-                            p.OK,
-                            p.NG,
-                            p.order_qty,
-                            p.ConfirmStart_ID,
-                            p.ConfirmEnd_ID,
-                            s.status_name
-                        FROM production_log p 
-                        JOIN Customer c 
-                        ON p.Cust_ID = c.Cust_ID 
-                        JOIN Terminal_size ts 
-                        ON p.T_ID = ts.T_ID 
-                        JOIN status s 
-                        ON p.status = s.status_id 
-                        WHERE 1=1`;
+                    p.Start_Time,
+                    p.Job_ID AS Job_ID,
+                    p.job_id AS job_id,
+                    p.Mh_ID,
+                    p.Emp_ID,
+                    c.Cust_Name,
+                    ts.T_Name,
+                    p.End_Time,
+                    p.OK,
+                    p.NG,
+                    p.order_qty,
+                    p.ConfirmStart_ID,
+                    p.ConfirmEnd_ID,
+                    s.status_name,
+                    
+                    -- คำนวณชั่วโมงการทำงาน
+                    ROUND(TIMESTAMPDIFF(MINUTE, p.Start_Time, IFNULL(p.End_Time, NOW())) / 60.0, 2) AS Work_Hours,
+                    
+                    -- 🔴 1. นับจำนวนรอบที่หยุด (ดึงจากตาราง machin_downtime ช่วงเวลาเดียวกัน)
+                    (SELECT COUNT(*) FROM machin_downtime d 
+                     WHERE d.Mh_ID = p.Mh_ID 
+                     AND d.Start_Time >= p.Start_Time 
+                     AND d.Start_Time <= IFNULL(p.End_Time, NOW())) AS Downtime_Count,
+                     
+                    -- 🔴 2. รวมเวลารวมที่หยุด (นาที) (ดึงจากตาราง machin_downtime ช่วงเวลาเดียวกัน)
+                    (SELECT IFNULL(SUM(TIMESTAMPDIFF(MINUTE, d.Start_Time, IFNULL(d.End_Time, NOW()))), 0) 
+                     FROM machin_downtime d 
+                     WHERE d.Mh_ID = p.Mh_ID 
+                     AND d.Start_Time >= p.Start_Time 
+                     AND d.Start_Time <= IFNULL(p.End_Time, NOW())) AS Downtime_Mins
+
+                FROM production_log p 
+                LEFT JOIN Customer c ON p.Cust_ID = c.Cust_ID 
+                LEFT JOIN Terminal_size ts ON p.T_ID = ts.T_ID 
+                LEFT JOIN status s ON p.status = s.status_id 
+                WHERE 1=1`;
+
     let params = [];
 
     if (mhId) {
@@ -262,21 +261,16 @@ app.get("/api/datalog", async (req, res) => {
       query += ` AND p.job_id = ?`;
       params.push(jobId);
     }
-    query += `ORDER BY Start_Time DESC`;
+    query += ` ORDER BY p.Start_Time DESC`;
 
     const [rows] = await pool.query(query, params);
     res.json(rows);
   } catch (err) {
-    console.error(err);
+    console.error("Datalog API Error:", err);
     res.status(500).send("Server Error");
   }
 });
-// วิธีการดึงข้อมูลการผลิตของเครื่องจักรตาม Mh_ID โดยเรียงลำดับจากเวลาที่เริ่มต้นล่าสุดไปยังเก่าสุด
-// http://localhost:5000/api/datalog?mhId=PU-42   showe ข้อมูลการผลิตของเครื่องจักร PU-42
-// http://localhost:5000/api/datalog?empId=112196 showe ข้อมูลการผลิตของพนักงาน EMP-001
-// http://localhost:5000/api/datalog?date=2026-09-14  showe ข้อมูลการผลิตของวันที่ 2026-09-14
-// http://localhost:5000/api/datalog?jobId=GQ42690089-0000  showe ข้อมูลการผลิตของ Job ID GQ42690089-0000
-// http://localhost:5000/api/datalog?mhId=PU-42&date=2026-09  showe ข้อมูลการผลิตของเครื่องจักร PU-42 ของวันที่ 2026-09-14
+
 
 // ดึงข้อมูลการผลิตตามเงื่อนไขที่กำหนด (รายชั่วโมง, รายวัน, รายเดือน, รายปี)
 app.get("/api/production/filter", async (req, res) => {
@@ -642,24 +636,518 @@ app.get("/api/production/downtime", async (req, res) => {
 // http://localhost:5000/api/production/downtime?datetime=2026-09  showe ข้อมูลการหยุดทำงานของเครื่องจักรทั้งหมดของเดือน 2026-09
 // http://localhost:5000/api/production/downtime?datetime=2026  showe ข้อมูลการหยุดทำงานของเครื่องจักรทั้งหมดของปี 2026
 
+
+// ดึงรายงานสรุปยอดผลิตรายชั่วโมงของพนักงานทั้งหมดใน 1 วัน จากตาราง production_sum
+app.get("/api/production/employee-hourly-report", async (req, res) => {
+  try {
+    const { date } = req.query; // รับค่ารูปแบบ YYYY-MM-DD
+    if (!date) {
+      return res.status(400).json({ message: "ต้องระบุวันที่ (date)" });
+    }
+
+    const query = `
+      WITH OrderedLogs AS (
+          SELECT 
+              Emp_ID, Mh_ID, Job_ID, Log_Timestamp, id, OK AS cumulative_count,
+              LAG(OK) OVER (PARTITION BY Mh_ID, Job_ID ORDER BY Log_Timestamp, id) AS prev_count
+          FROM production_sum 
+          WHERE DATE_FORMAT(Log_Timestamp, '%Y-%m-%d') = ?
+      ),
+      CalculatedDiff AS (
+          SELECT 
+              Emp_ID,
+              Mh_ID,
+              Log_Timestamp,
+              DATE_FORMAT(Log_Timestamp, '%H') AS hour_slot,
+              CASE
+                  WHEN prev_count IS NULL THEN cumulative_count
+                  WHEN cumulative_count < prev_count THEN cumulative_count
+                  ELSE cumulative_count - prev_count
+              END AS actual_diff
+          FROM OrderedLogs
+      )
+      SELECT 
+          Emp_ID,
+          GROUP_CONCAT(DISTINCT Mh_ID ORDER BY Mh_ID SEPARATOR ', ') AS machines,
+          hour_slot,
+          SUM(actual_diff) AS ok_per_hour
+      FROM CalculatedDiff
+      WHERE Emp_ID IS NOT NULL AND Emp_ID != ''
+      GROUP BY Emp_ID, hour_slot
+      ORDER BY Emp_ID, hour_slot;
+    `;
+
+    const [rows] = await pool.query(query, [date]);
+    res.json(rows);
+  } catch (err) {
+    console.error("Employee Hourly Report Error:", err);
+    res.status(500).send("Server Error");
+  }
+});
+
+// API: Factory Layout (ดึงข้อมูลผังโรงงาน)
+// ==========================================
+app.get("/api/layout", async (req, res) => {
+  try {
+    const [rooms] = await pool.query(`SELECT id, name, pos_x AS x, pos_y AS y, width, height, color FROM Factory_Room`);
+    
+    // 📌 ดึงเฉพาะเครื่องจักรที่ถูกจัดลงผังแล้วเท่านั้น (pos_x IS NOT NULL)
+    const [machines] = await pool.query(`
+      SELECT Mh_ID AS id, pos_x AS x, pos_y AS y, scale, 'RUN' AS status 
+      FROM Machine 
+      WHERE is_active = 1 AND pos_x IS NOT NULL
+    `);
+
+    res.json({ rooms, machines });
+  } catch (err) {
+    console.error("Layout Get Error:", err);
+    res.status(500).send("Server Error");
+  }
+});
+
+
+// ==========================================
+// API: บันทึกข้อมูลผังโรงงาน (Save Layout)
+// ==========================================
+app.post("/api/layout/save", async (req, res) => {
+  const { rooms, machines } = req.body;
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    // ----------------------------------------------------
+    // 1. จัดการเครื่องจักร: ล้างพิกัดทั้งหมดก่อน แล้วค่อยอัปเดตใหม่
+    // ----------------------------------------------------
+    // เคลียร์ให้เครื่องจักรทุกตัวหลุดออกจากผังก่อน (ตั้งพิกัดเป็น NULL)
+    await connection.query(`UPDATE Machine SET pos_x = NULL, pos_y = NULL`);
+    
+    // อัปเดตพิกัดเฉพาะเครื่องที่มีอยู่บนหน้าจอ ณ ปัจจุบัน
+    if (machines && machines.length > 0) {
+      for (const m of machines) {
+        await connection.query(
+          `UPDATE Machine SET pos_x = ?, pos_y = ?, scale = ? WHERE Mh_ID = ?`,
+          [m.x, m.y, m.scale, m.id]
+        );
+      }
+    }
+
+    // ----------------------------------------------------
+    // 2. จัดการห้อง: ลบห้องทั้งหมดทิ้งก่อน แล้วบันทึกห้องใหม่เข้าไป
+    // ----------------------------------------------------
+    await connection.query(`DELETE FROM Factory_Room`);
+    
+    if (rooms && rooms.length > 0) {
+      for (const r of rooms) {
+        await connection.query(
+          `INSERT INTO Factory_Room (id, name, pos_x, pos_y, width, height, color) 
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [r.id, r.name, r.x, r.y, r.width, r.height, r.color]
+        );
+      }
+    }
+
+    await connection.commit();
+    res.json({ message: "บันทึกผังโรงงานสำเร็จ!" });
+  } catch (err) {
+    await connection.rollback();
+    console.error("Layout Save Error:", err);
+    res.status(500).json({ message: "บันทึกข้อมูลล้มเหลว" });
+  } finally {
+    connection.release();
+  }
+});
+
+// ==========================================
+// API: จัดการข้อมูลตำแหน่ง (Job Position)
+// ==========================================
+app.get("/api/positions", async (req, res) => {
+  try {
+    const [rows] = await pool.query(`SELECT Pos_id, Pos_Name FROM Job_Position ORDER BY Pos_id ASC`);
+    res.json(rows);
+  } catch (err) {
+    console.error("Positions Get Error:", err);
+    res.status(500).json({ message: "Server Error" });
+  }
+});
+
+// ==========================================
+// API: จัดการข้อมูลพนักงาน (Employee Management)
+// ==========================================
+// 1. ดึงข้อมูลพนักงานทั้งหมด (Join กับชื่อตำแหน่ง)
+app.get("/api/employees", async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT e.Emp_ID, e.Emp_Name, e.Pos_id, e.is_active, p.Pos_Name 
+      FROM Emp e
+      LEFT JOIN Job_Position p ON e.Pos_id = p.Pos_id
+      ORDER BY e.Emp_ID ASC
+    `);
+    res.json(rows);
+  } catch (err) {
+    console.error("Employees Get Error:", err);
+    res.status(500).json({ message: "Server Error" });
+  }
+});
+
+// 2. เพิ่มพนักงานใหม่
+app.post("/api/employees", async (req, res) => {
+  const { Emp_ID, Emp_Name, Pos_id, is_active } = req.body;
+  try {
+    await pool.query(
+      `INSERT INTO Emp (Emp_ID, Emp_Name, Pos_id, is_active) VALUES (?, ?, ?, ?)`,
+      [Emp_ID, Emp_Name, Pos_id, is_active]
+    );
+    res.json({ message: "เพิ่มพนักงานสำเร็จ" });
+  } catch (err) {
+    console.error("Employee Add Error:", err);
+    // ดัก Error กรณีรหัสพนักงานซ้ำ
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(400).json({ message: "รหัสพนักงานนี้มีในระบบแล้ว" });
+    }
+    res.status(500).json({ message: "Server Error" });
+  }
+});
+
+// 3. แก้ไขข้อมูลพนักงาน
+app.put("/api/employees/:id", async (req, res) => {
+  const { id } = req.params;
+  const { Emp_Name, Pos_id, is_active } = req.body;
+  try {
+    await pool.query(
+      `UPDATE Emp SET Emp_Name = ?, Pos_id = ?, is_active = ? WHERE Emp_ID = ?`,
+      [Emp_Name, Pos_id, is_active, id]
+    );
+    res.json({ message: "อัปเดตข้อมูลสำเร็จ" });
+  } catch (err) {
+    console.error("Employee Update Error:", err);
+    res.status(500).json({ message: "Server Error" });
+  }
+});
+
+// 4. ลบพนักงาน
+app.delete("/api/employees/:id", async (req, res) => {
+  const { id } = req.params;
+  try {
+    await pool.query(`DELETE FROM Emp WHERE Emp_ID = ?`, [id]);
+    res.json({ message: "ลบพนักงานสำเร็จ" });
+  } catch (err) {
+    console.error("Employee Delete Error:", err);
+    res.status(500).json({ message: "Server Error (อาจมีข้อมูลอ้างอิงอยู่)" });
+  }
+});
+
+
+// ฟังก์ชันจัดการข้อมูลก่อนลง CSV
+const formatCSV = (value) => {
+    if (value === null || value === undefined) return '';
+    let str = String(value);
+    // ถ้าข้อความมี เครื่องหมายจุลภาค (,), เครื่องหมายคำพูด (") หรือ การขึ้นบรรทัดใหม่ (\n)
+    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+        // ให้เบิ้ลเครื่องหมายคำพูด "" และครอบด้วย " " อีกชั้น
+        str = `"${str.replace(/"/g, '""')}"`; 
+    }
+    return str;
+};
+
+// ==========================================
+// API: เพิ่มลูกค้าใหม่ (POST /api/customers)
+// ==========================================
+app.post('/api/customers', async (req, res) => {
+    try {
+        const { Cust_Name, is_active } = req.body;
+        const [result] = await pool.query(
+            `INSERT INTO Customer (Cust_Name, is_active) VALUES (?, ?)`,
+            [Cust_Name, is_active !== undefined ? is_active : 1]
+        );
+        res.json({ message: "เพิ่มลูกค้าสำเร็จ", Cust_ID: result.insertId });
+    } catch (err) {
+        console.error("Add Customer Error:", err);
+        res.status(500).json({ message: err.message });
+    }
+});
+
+// ==========================================
+// API: แก้ไขข้อมูลลูกค้า (PUT /api/customers/:id)
+// ==========================================
+app.put('/api/customers/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { Cust_Name, is_active } = req.body;
+        await pool.query(
+            `UPDATE Customer SET Cust_Name = ?, is_active = ? WHERE Cust_ID = ?`,
+            [Cust_Name, is_active, id]
+        );
+        res.json({ message: "อัปเดตข้อมูลลูกค้าสำเร็จ" });
+    } catch (err) {
+        console.error("Update Customer Error:", err);
+        res.status(500).json({ message: err.message });
+    }
+});
+
+// ==========================================
+// API: ลบข้อมูลลูกค้า (DELETE /api/customers/:id)
+// ==========================================
+app.delete('/api/customers/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        await pool.query(`DELETE FROM Customer WHERE Cust_ID = ?`, [id]);
+        res.json({ message: "ลบลูกค้าสำเร็จ" });
+    } catch (err) {
+        console.error("Delete Customer Error:", err);
+        res.status(500).json({ message: "ไม่สามารถลบได้เนื่องจากมีข้อมูลอ้างอิงอยู่" });
+    }
+});
+
+// ==========================================
+// API: เพิ่มเทอร์มินอลใหม่ (POST /api/terminals)
+// ==========================================
+app.post('/api/terminals', async (req, res) => {
+    try {
+        const { T_Name, size_in, size_out } = req.body;
+        const [result] = await pool.query(
+            `INSERT INTO Terminal_size (T_Name, size_in, size_out) VALUES (?, ?, ?)`,
+            [T_Name, size_in || 0, size_out || 0]
+        );
+        res.json({ message: "เพิ่มเทอร์มินอลสำเร็จ", T_ID: result.insertId });
+    } catch (err) {
+        console.error("Add Terminal Error:", err);
+        res.status(500).json({ message: err.message });
+    }
+});
+
+// ==========================================
+// API: แก้ไขข้อมูลเทอร์มินอล (PUT /api/terminals/:id)
+// ==========================================
+app.put('/api/terminals/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { T_Name, size_in, size_out } = req.body;
+        await pool.query(
+            `UPDATE Terminal_size SET T_Name = ?, size_in = ?, size_out = ? WHERE T_ID = ?`,
+            [T_Name, size_in || 0, size_out || 0, id]
+        );
+        res.json({ message: "อัปเดตเทอร์มินอลสำเร็จ" });
+    } catch (err) {
+        console.error("Update Terminal Error:", err);
+        res.status(500).json({ message: err.message });
+    }
+});
+
+// ==========================================
+// API: ลบข้อมูลเทอร์มินอล (DELETE /api/terminals/:id)
+// ==========================================
+app.delete('/api/terminals/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        await pool.query(`DELETE FROM Terminal_size WHERE T_ID = ?`, [id]);
+        res.json({ message: "ลบเทอร์มินอลสำเร็จ" });
+    } catch (err) {
+        console.error("Delete Terminal Error:", err);
+        res.status(500).json({ message: "ไม่สามารถลบได้เนื่องจากมีข้อมูลอ้างอิงอยู่" });
+    }
+});
+
+// ==========================================
+// 1. API: ดึงรายชื่อลูกค้าทั้งหมด (ให้หน้าเว็บ React แสดงตาราง)
+// ==========================================
+app.get("/api/customers", async (req, res) => {
+    try {
+        const [rows] = await pool.query(`SELECT Cust_ID, Cust_Name, is_active FROM Customer ORDER BY Cust_ID ASC`);
+        res.json(rows);
+    } catch (err) {
+        console.error("Get Customers Error:", err);
+        res.status(500).json({ message: "Server Error" });
+    }
+});
+
+// ==========================================
+// 2. API: ดึงรายการ Terminal ทั้งหมด (ให้หน้าเว็บ React แสดงตาราง)
+// ==========================================
+app.get("/api/terminals", async (req, res) => {
+    try {
+        const [rows] = await pool.query(`SELECT T_ID, T_Name, size_in, size_out FROM Terminal_size ORDER BY T_ID ASC`);
+        res.json(rows);
+    } catch (err) {
+        console.error("Get Terminals Error:", err);
+        res.status(500).json({ message: "Server Error" });
+    }
+});
+
+
+// ==========================================
+// 1. API: เช็คเวอร์ชันล่าสุด (ให้เครื่องจักรเรียก)
+// ==========================================
+app.get('/get_latest_version', (req, res) => {
+    try {
+        const files = fs.readdirSync(UPLOAD_FOLDER);
+        // หาไฟล์ที่ชื่อขึ้นต้นด้วย setting และลงท้ายด้วย .csv
+        const settingFiles = files.filter(f => f.startsWith('setting') && f.endsWith('.csv'));
+
+        if (settingFiles.length === 0) {
+            return res.status(404).json({ filename: null, error: 'No setting file found' });
+        }
+
+        // หาไฟล์ที่ใหม่ที่สุด (เทียบเวลา Modification Time)
+        let latestFile = settingFiles[0];
+        let latestTime = fs.statSync(path.join(UPLOAD_FOLDER, latestFile)).mtime.getTime();
+
+        for (let i = 1; i < settingFiles.length; i++) {
+            const stat = fs.statSync(path.join(UPLOAD_FOLDER, settingFiles[i]));
+            if (stat.mtime.getTime() > latestTime) {
+                latestTime = stat.mtime.getTime();
+                latestFile = settingFiles[i];
+            }
+        }
+
+        console.log(`Machine checked version. Sending: ${latestFile}`);
+        res.json({ filename: latestFile });
+    } catch (error) {
+        console.error("Get Version Error:", error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ==========================================
+// 2. API: ดาวน์โหลดไฟล์ (ให้เครื่องจักรเรียก)
+// ==========================================
+app.get('/download/:filename', (req, res) => {
+    const filepath = path.join(UPLOAD_FOLDER, req.params.filename);
+    if (fs.existsSync(filepath)) {
+        res.download(filepath);
+    } else {
+        res.status(404).send('File not found');
+    }
+});
+
+// ==========================================
+// 1. API: ดึงรายชื่อไฟล์ทั้งหมดในโฟลเดอร์ UpdateFiles
+// ==========================================
+app.get('/api/files_list', (req, res) => {
+    try {
+        if (!fs.existsSync(UPLOAD_FOLDER)) {
+            return res.json({ files: [] });
+        }
+        const files = fs.readdirSync(UPLOAD_FOLDER);
+        // กรองเอาเฉพาะไฟล์ .csv
+        const csvFiles = files.filter(f => f.endsWith('.csv')).sort().reverse();
+        res.json({ files: csvFiles });
+    } catch (err) {
+        console.error("Files List Error:", err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ==========================================
+// 2. API: แปลง DB เป็น CSV (พร้อมเช็คไฟล์ซ้ำ)
+// ==========================================
+app.post("/api/publish_csv", async (req, res) => {
+    try {
+        // 1. ดึงข้อมูลจากฐานข้อมูล
+        const [customers] = await pool.query(`SELECT Cust_Name FROM Customer WHERE is_active = 1`);
+        const [terminals] = await pool.query(`SELECT T_Name, size_in, size_out FROM Terminal_size`);
+        
+        // 2. สร้าง String CSV
+        let csvContent = "TYPE,NAME,SIZE_IN,SIZE_OUT\n"; 
+        
+        customers.forEach(c => {
+            const type = formatCSV("CUSTOMER");
+            const name = formatCSV(c.Cust_Name);
+            csvContent += `${type},${name},,\n`;
+        });
+        
+        terminals.forEach(t => {
+            const type = formatCSV("TERMINAL");
+            const name = formatCSV(t.T_Name);
+            const sizeIn = formatCSV(t.size_in);
+            const sizeOut = formatCSV(t.size_out);
+            csvContent += `${type},${name},${sizeIn},${sizeOut}\n`;
+        });
+
+        const finalContent = '\uFEFF' + csvContent;
+
+        // 3. เช็คว่าข้อมูลใหม่ "เหมือนกับไฟล์ล่าสุดที่มีอยู่แล้วหรือไม่"
+        if (!fs.existsSync(UPLOAD_FOLDER)) {
+            fs.mkdirSync(UPLOAD_FOLDER, { recursive: true });
+        }
+        
+        const files = fs.readdirSync(UPLOAD_FOLDER).filter(f => f.startsWith('setting') && f.endsWith('.csv'));
+        
+        if (files.length > 0) {
+            // หาไฟล์ล่าสุด
+            let latestFile = files[0];
+            let latestTime = fs.statSync(path.join(UPLOAD_FOLDER, latestFile)).mtime.getTime();
+            for (let i = 1; i < files.length; i++) {
+                const stat = fs.statSync(path.join(UPLOAD_FOLDER, files[i]));
+                if (stat.mtime.getTime() > latestTime) {
+                    latestTime = stat.mtime.getTime();
+                    latestFile = files[i];
+                }
+            }
+
+            // อ่านเนื้อหาไฟล์ล่าสุดมาเทียบกับข้อมูลปัจจุบัน
+            const latestFilePath = path.join(UPLOAD_FOLDER, latestFile);
+            const existingContent = fs.readFileSync(latestFilePath, 'utf8');
+
+            if (existingContent === finalContent) {
+                return res.status(400).json({ 
+                    message: `ข้อมูลปัจจุบันเหมือนกับไฟล์ล่าสุด (${latestFile}) ทุกประการ ระบบจึงไม่ได้สร้างไฟล์ใหม่` 
+                });
+            }
+        }
+
+        // 4. ถ้าข้อมูลไม่เหมือน หรือยังไม่มีไฟล์เลย ให้สร้างไฟล์ใหม่
+        const version = Date.now();
+        const newFilename = `setting_v${version}.csv`;
+        const filepath = path.join(UPLOAD_FOLDER, newFilename);
+
+        fs.writeFileSync(filepath, finalContent, 'utf8');
+
+        res.json({ message: "แปลงและบันทึกไฟล์อัปเดตสำเร็จ!", filename: newFilename });
+    } catch (err) {
+        console.error("Publish Error:", err);
+        res.status(500).json({ message: "Server Error" });
+    }
+});
+
+// ==========================================
+// API: ลบไฟล์ในโฟลเดอร์ UpdateFiles
+// ==========================================
+app.get('/delete_file/:filename', (req, res) => {
+    try {
+        const filename = path.basename(req.params.filename); // ป้องกัน Directory Traversal
+        const filepath = path.join(UPLOAD_FOLDER, filename);
+
+        if (fs.existsSync(filepath)) {
+            fs.unlinkSync(filepath);
+            res.json({ message: `ลบไฟล์ ${filename} สำเร็จ` });
+        } else {
+            res.status(404).json({ message: "ไม่พบไฟล์ที่ต้องการลบ" });
+        }
+    } catch (err) {
+        console.error("Delete File Error:", err);
+        res.status(500).json({ message: "Server Error" });
+    }
+});
+
 const PORT = process.env.PORT || 5000;
 
 // ฟังก์ชันสำหรับรอให้ Database พร้อมทำงาน
 async function waitForDatabase() {
   let isConnected = false;
-  
+
   console.log('⏳ Checking database connection...');
-  
+
   while (!isConnected) {
     try {
       // ลองเคาะประตูฐานข้อมูลด้วยคำสั่งง่ายๆ
-      await pool.query('SELECT 1'); 
+      await pool.query('SELECT 1');
       console.log('✅ Database is Ready!');
       isConnected = true;
     } catch (error) {
       // ถ้าเคาะแล้วไม่ตอบ (เช่น เจอ ECONNREFUSED) ให้รอ 3 วินาทีแล้วลองใหม่
       console.error(`⚠️ Database not ready yet (${error.code}). Retrying in 3 seconds...`);
-      await new Promise(resolve => setTimeout(resolve, 3000)); 
+      await new Promise(resolve => setTimeout(resolve, 3000));
     }
   }
 }
@@ -668,7 +1156,7 @@ async function waitForDatabase() {
 waitForDatabase().then(() => {
   app.listen(PORT, () => {
     console.log(`🚀 Node.js Server running on http://localhost:${PORT}`);
-    
+
     // เมื่อรัน API ผ่านแล้ว ค่อยให้ MQTT เริ่มทำงาน (เพื่อป้องกัน MQTT เรียกใช้ DB ตอนยังไม่พร้อม)
     setupMQTT();
   });

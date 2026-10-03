@@ -19,6 +19,7 @@ import Maintenance from './pages/Maintenance';
 import Report from './pages/Report';
 import Supervisor from './pages/Supervisor';
 import SystemLogs from './pages/SystemLogs';
+import EmployeeManagement from './pages/EmployeeManagement';
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(() => Boolean(localStorage.getItem('token')));
@@ -60,6 +61,7 @@ function App() {
       system_logs: 'system_logs',         // 📌 แก้ให้ตรงกัน
       maintenance: 'maintenance',
       report: 'report',
+      employee_management: 'employee_management',
       supervisor: 'supervisor'
     };
 
@@ -94,6 +96,7 @@ function App() {
       case 'system_logs': return <SystemLogs />;
       case 'maintenance': return <Maintenance />;
       case 'report': return <Report />;
+      case 'employee_management': return <EmployeeManagement />;
       case 'supervisor': return <Supervisor />;
       default: return <Dashboard />;
     }

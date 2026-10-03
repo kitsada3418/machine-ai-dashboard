@@ -199,6 +199,13 @@ function Navbar({ currentPage, setCurrentPage, userRole, onLogout }) {
               <span className="nav-icon">👔</span><span className="nav-label">Supervisor</span>
             </button>
           )}
+           
+          {/* Employee Management */}
+          {canShowMenu('employee_management') && (
+            <button className={`sidebar-btn ${currentPage === 'employee_management' ? 'active' : ''}`} onClick={() => setCurrentPage('employee_management')}>
+              <span className="nav-icon">👥</span><span className="nav-label">Emp Management</span>
+            </button>
+          )}
 
           {/* User Management */}
           {canShowMenu('user_management') && (
