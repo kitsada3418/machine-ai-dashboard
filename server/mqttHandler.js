@@ -480,9 +480,9 @@ cron.schedule('0 0 * * *', async () => {
     timezone: "Asia/Bangkok" // <--- บังคับให้เปรียบเทียบเวลาโดยอิงจากโซนเวลาประเทศไทยเท่านั้น
 });
 
-initDailyState().then(() => {
-    console.log("✅ Server Startup: Initialized Daily Production State");
-});
+//initDailyState().then(() => {
+//    console.log("✅ Server Startup: Initialized Daily Production State");
+//});
 
 // 📌 บังคับอัปเดตยอดทุกๆ "นาทีที่ 59" ของทุกชั่วโมง (เช่น 08:59, 09:59, 10:59)
 cron.schedule('59 * * * *', async () => {
@@ -519,4 +519,8 @@ cron.schedule('59 * * * *', async () => {
 });
 
 
-module.exports = { setupMQTT, liveDataCache };
+module.exports = {
+    setupMQTT,
+    liveDataCache,
+    initDailyState
+};

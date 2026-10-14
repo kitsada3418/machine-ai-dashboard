@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { apiFetch } from '../api';
 
-function Layout({ setCurrentPage, setSelectedMachine }) {
-  // 📌 เปลี่ยนค่าเริ่มต้นเป็น Array ว่าง เพื่อรอรับข้อมูลจาก Database แบบเดียวกับหน้า FreeLayout
+// 📌 1. รับ Props selectedMachine เข้ามาเพิ่ม
+function Layout({ setCurrentPage, setSelectedMachine, selectedMachine }) {
   const [rooms, setRooms] = useState([]);
   const [machines, setMachines] = useState([]);
+  const [walkways, setWalkways] = useState([]);
+  const [doors, setDoors] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // 1. ดึงข้อมูลผังโรงงานจาก Database เมื่อเปิดหน้า
   useEffect(() => {
     let cancelled = false;
     const fetchLayout = async () => {
@@ -18,6 +19,8 @@ function Layout({ setCurrentPage, setSelectedMachine }) {
           if (cancelled) return;
           setRooms(data.rooms || []);
           setMachines(data.machines || []);
+          setWalkways(data.walkways || []);
+          setDoors(data.doors || []);
         } else {
           console.error("Failed to fetch layout data");
         }
@@ -30,7 +33,6 @@ function Layout({ setCurrentPage, setSelectedMachine }) {
     
     fetchLayout();
     
-    // หากต้องการให้ข้อมูลอัปเดตอัตโนมัติ (Auto-refresh) ทุก 10 วินาที สามารถใช้ setInterval ได้
     const interval = setInterval(fetchLayout, 10000); 
     return () => { 
       cancelled = true; 
@@ -38,9 +40,15 @@ function Layout({ setCurrentPage, setSelectedMachine }) {
     };
   }, []);
 
-  // นับจำนวนสถานะ
   const runCount = machines.filter(m => m.status === 'RUN').length;
-  const stopCount = machines.filter(m => m.status !== 'RUN').length;
+  const stopCount = machines.filter(m => m.status === 'STOP').length;
+  const offlineCount = machines.filter(m => m.status === 'OFFLINE' || !m.status).length;
+
+  const getStatusStyle = (status) => {
+    if (status === 'RUN') return { color: '#22c55e', badge: 'bg-success' }; 
+    if (status === 'STOP') return { color: '#f59e0b', badge: 'bg-warning text-dark' }; 
+    return { color: '#94a3b8', badge: 'bg-secondary' }; 
+  };
 
   return (
     <div className="container-fluid p-3 animate__animated animate__fadeIn">
@@ -60,10 +68,14 @@ function Layout({ setCurrentPage, setSelectedMachine }) {
             <i className="bi bi-pause-circle-fill me-2"></i>
             STOP: {stopCount}
           </span>
+          <span className="badge bg-secondary px-3 py-2 d-flex align-items-center shadow-sm">
+            <i className="bi bi-power me-2"></i>
+            OFFLINE: {offlineCount}
+          </span>
         </div>
       </div>
 
-      {/* CANVAS AREA (แสดงผลตามหน้า Free Layout เป๊ะๆ แต่ไม่ให้ลาก) */}
+      {/* CANVAS AREA */}
       <div 
         className="position-relative bg-white border rounded-4 shadow-sm overflow-hidden"
         style={{ 
@@ -92,14 +104,8 @@ function Layout({ setCurrentPage, setSelectedMachine }) {
                 key={room.id}
                 className="position-absolute border border-2 rounded-4 shadow-sm p-3 d-flex flex-column justify-content-between"
                 style={{
-                  left: `${room.x}px`,
-                  top: `${room.y}px`,
-                  width: `${room.width}px`,
-                  height: `${room.height}px`,
-                  backgroundColor: room.color,
-                  borderColor: '#94a3b8',
-                  zIndex: 1,
-                  pointerEvents: 'none' // ห้องไม่ต้องกดอะไรได้
+                  left: `${room.x}px`, top: `${room.y}px`, width: `${room.width}px`, height: `${room.height}px`,
+                  backgroundColor: room.color, borderColor: '#94a3b8', zIndex: 1, pointerEvents: 'none'
                 }}
               >
                 <div className="fw-bold text-secondary border-bottom border-secondary pb-2 d-flex justify-content-between align-items-center">
@@ -109,52 +115,91 @@ function Layout({ setCurrentPage, setSelectedMachine }) {
               </div>
             ))}
 
-            {/* เรนเดอร์เครื่องจักร (Machines) - คลิกเพื่อดู Log ได้ */}
-            {machines.map((m) => (
+            {/* เรนเดอร์ทางเดิน (Walkways) */}
+            {walkways.map((w) => (
               <div
-                key={m.id}
-                className="position-absolute bg-white border border-2 rounded-3 shadow p-2 text-center machine-card-hover"
+                key={w.id} 
+                className="position-absolute d-flex flex-column justify-content-between"
                 style={{
-                  left: `${m.x}px`,
-                  top: `${m.y}px`,
-                  width: `${Math.round(130 * m.scale)}px`,
-                  borderColor: m.status === 'RUN' ? '#22c55e' : '#f59e0b',
-                  cursor: 'pointer', // รูปเมาส์เป็นนิ้วชี้เวลาเอาไปวาง
-                  zIndex: 5,
-                  userSelect: 'none',
-                  transformOrigin: 'top left',
-                  transition: 'transform 0.2s, box-shadow 0.2s',
-                }}
-                onClick={() => {
-                  setSelectedMachine(m.id);
-                  setCurrentPage('log_detail');
-                }}
-                title={`ดูประวัติของเครื่อง ${m.id}`}
-                // ลูกเล่น CSS เพิ่มเติมเวลาเอาเมาส์ชี้
-                onMouseEnter={(e) => {
-                   e.currentTarget.style.transform = 'scale(1.05)';
-                   e.currentTarget.style.boxShadow = '0 0.5rem 1rem rgba(0,0,0,0.15)';
-                }}
-                onMouseLeave={(e) => {
-                   e.currentTarget.style.transform = 'scale(1)';
-                   e.currentTarget.style.boxShadow = '0 0.125rem 0.25rem rgba(0,0,0,0.075)';
+                  left: `${w.x}px`, top: `${w.y}px`, width: `${w.width}px`, height: `${w.height}px`,
+                  backgroundColor: w.color, border: '2px dashed #94a3b8', zIndex: 2, pointerEvents: 'none'
                 }}
               >
-                <div className="d-flex justify-content-between align-items-center mb-1">
-                  <span className={`badge ${m.status === 'RUN' ? 'bg-success' : 'bg-warning text-dark'}`} style={{ fontSize: `${Math.max(0.55, 0.55 * m.scale)}rem` }}>
-                    {m.status}
-                  </span>
-                  <span className="text-muted fw-bold" style={{ fontSize: `${Math.max(0.65, 0.65 * m.scale)}rem` }}>
-                    {m.temp || 'N/A'}
-                  </span>
-                </div>
-                
-                <div className="fw-bold text-dark my-1" style={{ fontSize: `${Math.max(0.9, 1 * m.scale)}rem` }}>{m.id}</div>
-                <div className="text-primary fw-bold" style={{ fontSize: `${Math.max(0.6, 0.65 * m.scale)}rem` }}>
-                  View Logs ➜
+                <div className="d-flex justify-content-between p-1">
+                  <span className="text-muted fw-bold" style={{ fontSize: '0.7rem' }}>ทางเดิน</span>
                 </div>
               </div>
             ))}
+
+            {/* เรนเดอร์ประตู (Doors) */}
+            {doors.map((d) => (
+              <div
+                key={d.id} 
+                className="position-absolute d-flex flex-column justify-content-center align-items-center"
+                style={{
+                  left: `${d.x}px`, top: `${d.y}px`, width: `${d.width}px`, height: `${d.height}px`,
+                  backgroundColor: d.color, border: '1px solid #78350f', zIndex: 3, boxShadow: '0 2px 4px rgba(0,0,0,0.2)', pointerEvents: 'none'
+                }}
+              >
+              </div>
+            ))}
+
+            {/* เรนเดอร์เครื่องจักร (Machines) */}
+            {machines.map((m) => {
+              const style = getStatusStyle(m.status); 
+              const scale = m.scale || 1;
+              
+              // 📌 2. เช็คว่าเครื่องนี้คือเครื่องที่ถูกเลือกมาจากหน้า Dashboard หรือไม่
+              const isSelected = m.id === selectedMachine;
+
+              return (
+                <div
+                  key={m.id}
+                  className={`position-absolute bg-white rounded-3 p-2 text-center machine-card-hover ${isSelected ? 'animate__animated animate__pulse animate__infinite' : ''}`}
+                  style={{
+                    left: `${m.x}px`,
+                    top: `${m.y}px`,
+                    width: `${Math.round(130 * scale)}px`, // แก้บั๊กเครื่องหมายคูณ
+                    
+                    // 📌 3. ถ้าถูกเลือก ให้ขอบหนาขึ้น และใส่เงาเรืองแสงสีส้ม/แดง
+                    border: isSelected ? `3px solid #ef4444` : `2px solid ${style.color}`,
+                    boxShadow: isSelected ? '0px 0px 20px 8px rgba(239, 68, 68, 0.6)' : '0 0.125rem 0.25rem rgba(0,0,0,0.075)',
+                    transform: isSelected ? 'scale(1.1)' : 'scale(1)',
+                    zIndex: isSelected ? 100 : 5, // ดันเครื่องที่เลือกมาไว้ชั้นบนสุด
+                    
+                    cursor: 'pointer',
+                    userSelect: 'none',
+                    transformOrigin: 'top left',
+                    transition: 'all 0.3s ease-in-out',
+                  }}
+                  onClick={() => {
+                    setSelectedMachine(m.id);
+                    setCurrentPage('log_detail');
+                  }}
+                  title={`ดูประวัติของเครื่อง ${m.id}`}
+                  onMouseEnter={(e) => {
+                     e.currentTarget.style.transform = isSelected ? 'scale(1.15)' : 'scale(1.05)';
+                  }}
+                  onMouseLeave={(e) => {
+                     e.currentTarget.style.transform = isSelected ? 'scale(1.1)' : 'scale(1)';
+                  }}
+                >
+                  <div className="d-flex justify-content-between align-items-center mb-1">
+                    <span className={`badge ${style.badge}`} style={{ fontSize: `${Math.max(0.55, 0.55 * scale)}rem` }}>
+                      {m.status || 'OFFLINE'}
+                    </span>
+                    <span className="text-muted fw-bold" style={{ fontSize: `${Math.max(0.65, 0.65 * scale)}rem` }}>
+                      {m.temp || 'N/A'}
+                    </span>
+                  </div>
+                  
+                  <div className="fw-bold text-dark my-1" style={{ fontSize: `${Math.max(0.9, 1 * scale)}rem` }}>{m.id}</div>
+                  <div className="text-primary fw-bold" style={{ fontSize: `${Math.max(0.6, 0.65 * scale)}rem` }}>
+                    View Logs ➜
+                  </div>
+                </div>
+              );
+            })}
           </>
         )}
       </div>

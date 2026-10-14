@@ -20,6 +20,7 @@ import Report from './pages/Report';
 import Supervisor from './pages/Supervisor';
 import SystemLogs from './pages/SystemLogs';
 import EmployeeManagement from './pages/EmployeeManagement';
+import MachineToday from './pages/MachineToday';
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(() => Boolean(localStorage.getItem('token')));
@@ -44,9 +45,6 @@ function App() {
   // ฟังก์ชันตัวแทนแสดงหน้าจอ หรือหน้าแจ้งเตือนไม่มีสิทธิ์
   const renderPageContent = () => {
     // กำหนด mapping ระหว่าง currentPage กับ pageId ที่ใช้เช็คสิทธิ์
-    if (currentPage === 'dashboard') {
-      return <Dashboard />;
-    }
     const pageMapping = {
       dashboard: 'dashboard',
       graphs: 'graphs',
@@ -57,11 +55,12 @@ function App() {
       layout: 'layout',
       free_layout: 'free_layout',
       oee_dashboard: 'oee_dashboard',
-      user_management: 'user_management', // 📌 แก้ให้ตรงกัน
-      system_logs: 'system_logs',         // 📌 แก้ให้ตรงกัน
+      user_management: 'user_management', 
+      system_logs: 'system_logs',         
       maintenance: 'maintenance',
       report: 'report',
       employee_management: 'employee_management',
+      machine_today: 'dashboard', // ให้สิทธิ์ผูกกับ dashboard หรือสร้างสิทธิ์เพิ่มตามต้องการ
       supervisor: 'supervisor'
     };
 
@@ -81,24 +80,42 @@ function App() {
       );
     }
 
-    // แสดงหน้าจอปกติ
+    // แสดงหน้าจอปกติ (พร้อมส่ง Props ครบถ้วน)
     switch (currentPage) {
-      case 'dashboard': return <Dashboard />;
-      case 'graphs': return <Graphs />;
-      case 'alarms': return <AlarmLog />;
-      case 'logs': return <Logs setCurrentPage={setCurrentPage} setSelectedMachine={setSelectedMachine} />;
-      case 'log_detail': return <LogDetail setCurrentPage={setCurrentPage} machineId={selectedMachine} />;
-      case 'manager': return <Manager />;
-      case 'layout': return <Layout setCurrentPage={setCurrentPage} setSelectedMachine={setSelectedMachine} />;
-      case 'free_layout': return <FreeLayout />;
-      case 'oee_dashboard': return <OeeDashboard />;
-      case 'user_management': return <UserManagement />;
-      case 'system_logs': return <SystemLogs />;
-      case 'maintenance': return <Maintenance />;
-      case 'report': return <Report />;
-      case 'employee_management': return <EmployeeManagement />;
-      case 'supervisor': return <Supervisor />;
-      default: return <Dashboard />;
+      case 'dashboard': 
+        return <Dashboard setCurrentPage={setCurrentPage} setSelectedMachine={setSelectedMachine} />;
+      case 'graphs': 
+        return <Graphs />;
+      case 'alarms': 
+        return <AlarmLog />;
+      case 'logs': 
+        return <Logs setCurrentPage={setCurrentPage} setSelectedMachine={setSelectedMachine} />;
+      case 'log_detail': 
+        return <LogDetail setCurrentPage={setCurrentPage} machineId={selectedMachine} />;
+      case 'manager': 
+        return <Manager />;
+      case 'layout': 
+        return <Layout setCurrentPage={setCurrentPage} setSelectedMachine={setSelectedMachine} selectedMachine={selectedMachine} />;
+      case 'free_layout': 
+        return <FreeLayout />;
+      case 'oee_dashboard': 
+        return <OeeDashboard />;
+      case 'user_management': 
+        return <UserManagement />;
+      case 'system_logs': 
+        return <SystemLogs />;
+      case 'maintenance': 
+        return <Maintenance />;
+      case 'report': 
+        return <Report />;
+      case 'employee_management': 
+        return <EmployeeManagement />;
+      case 'machine_today': 
+        return <MachineToday selectedMachine={selectedMachine} setCurrentPage={setCurrentPage} />;
+      case 'supervisor': 
+        return <Supervisor />;
+      default: 
+        return <Dashboard setCurrentPage={setCurrentPage} setSelectedMachine={setSelectedMachine} />;
     }
   };
 
@@ -116,7 +133,7 @@ function App() {
         currentPage={currentPage} 
         setCurrentPage={setCurrentPage} 
         userRole={userRole} 
-        userPermissions={userPermissions} // ส่งสิทธิ์ไปซ่อนเมนูใน Navbar ด้วยถ้าต้องการ
+        userPermissions={userPermissions} 
         onLogout={() => {
           localStorage.clear();
           setIsLoggedIn(false);

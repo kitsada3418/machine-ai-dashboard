@@ -1,12 +1,17 @@
 import { useState, useEffect } from 'react';
 import { apiFetch } from '../api';
 
-function Dashboard() {
+// 📌 1. รับ Props setCurrentPage และ setSelectedMachine เข้ามา
+function Dashboard({ setCurrentPage, setSelectedMachine }) {
     const [viewMode, setViewMode] = useState('table'); // 'grid' หรือ 'table'
     const [dashboardData, setDashboardData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('ALL');
+
+    // 📌 2. เพิ่ม State สำหรับจัดการป๊อปอัพ (Modal)
+    const [showActionModal, setShowActionModal] = useState(false);
+    const [clickedMachine, setClickedMachine] = useState('');
 
     useEffect(() => {
         let cancelled = false;
@@ -30,6 +35,12 @@ function Dashboard() {
             clearInterval(interval);
         };
     }, []);
+
+    // 📌 3. ฟังก์ชันจัดการเมื่อคลิกที่เครื่องจักร
+    const handleMachineClick = (mhId) => {
+        setClickedMachine(mhId);
+        setShowActionModal(true);
+    };
 
     const totalProduction = dashboardData?.total_day || 0;
     const mhOnline = dashboardData?.mh_online || 0;
@@ -309,8 +320,11 @@ function Dashboard() {
 
                         return (
                             <div className="col-xl-3 col-lg-4 col-md-6" key={index}>
+                                {/* 📌 4. ใส่ onClick และ cursor pointer ให้คลิกการ์ดได้ */}
                                 <div
                                     className={`card h-100 border-2 rounded-4 shadow-sm card-hover ${borderColor} ${cardClass}`}
+                                    onClick={() => handleMachineClick(item.Mh_ID)}
+                                    style={{ cursor: 'pointer' }}
                                 >
                                     <div className="card-header bg-transparent border-0 pt-3 pb-0 d-flex justify-content-between align-items-center">
                                         <h4 className="fw-bold m-0 text-dark d-flex align-items-center">
@@ -479,7 +493,7 @@ function Dashboard() {
                                     } else if (isStopped) {
                                         statusColor = 'warning';
                                         statusText = 'STOP';
-                                        rowClass = 'stop-row'; // 🟡 แถวสีเหลืองโค้งมนกระพริบเต็มแถว
+                                        rowClass = 'stop-row'; 
                                     } else if (isRunning) {
                                         statusColor = 'success';
                                         statusText = 'RUN';
@@ -488,7 +502,7 @@ function Dashboard() {
                                     if (alarmOn) {
                                         statusColor = 'danger';
                                         statusAlarmColor = 'danger';
-                                        rowClass = 'alarm-row'; // 🔴 แถวสีแดงโค้งมนกระพริบเต็มแถว
+                                        rowClass = 'alarm-row'; 
                                     }
 
                                     const qtyOrder = Number(item.qty_order) || 0;
@@ -497,9 +511,12 @@ function Dashboard() {
                                         qtyOrder > 0 ? Math.min((qtyOk / qtyOrder) * 100, 100) : 0;
 
                                     return (
+                                        // 📌 5. ใส่ onClick ให้คลิกแถวใน Table ได้
                                         <tr
                                             key={index}
                                             className={`text-center align-middle ${rowClass}`}
+                                            onClick={() => handleMachineClick(item.Mh_ID)}
+                                            style={{ cursor: 'pointer' }}
                                         >
                                             <td className="fw-bold text-dark fs-6">{item.Mh_ID}</td>
                                             <td>
@@ -559,6 +576,43 @@ function Dashboard() {
                                 })}
                             </tbody>
                         </table>
+                    </div>
+                </div>
+            )}
+
+            {/* ================= 📌 6. MODAL ป๊อปอัพตัวเลือก (แสดงเมื่อกดการ์ด/ตาราง) ================= */}
+            {showActionModal && (
+                <div className="position-fixed top-0 start-0 w-100 h-100 d-flex justify-content-center align-items-center" style={{ backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1050 }}>
+                    <div className="bg-white p-4 rounded-4 shadow-lg animate__animated animate__zoomIn" style={{ width: '380px' }}>
+                        <div className="d-flex justify-content-between align-items-center mb-3">
+                            <h4 className="fw-bold text-primary m-0"><i className="bi bi-cpu me-2"></i>เครื่อง {clickedMachine}</h4>
+                            <button className="btn-close" onClick={() => setShowActionModal(false)}></button>
+                        </div>
+                        <p className="text-muted small mb-4">โปรดเลือกรายการที่คุณต้องการดูข้อมูล</p>
+                        
+                        <div className="d-flex flex-column gap-3">
+                            <button 
+                                className="btn btn-outline-primary fw-bold py-3 rounded-4 shadow-sm text-start"
+                                onClick={() => {
+                                    setSelectedMachine(clickedMachine);
+                                    setCurrentPage('machine_today');
+                                    setShowActionModal(false);
+                                }}
+                            >
+                                <i className="bi bi-bar-chart-line-fill fs-4 me-3"></i>ดูข้อมูลการทำงานของวันนี้
+                            </button>
+                            
+                            <button 
+                                className="btn btn-outline-success fw-bold py-3 rounded-4 shadow-sm text-start"
+                                onClick={() => {
+                                    setSelectedMachine(clickedMachine);
+                                    setCurrentPage('layout');
+                                    setShowActionModal(false);
+                                }}
+                            >
+                                <i className="bi bi-geo-alt-fill fs-4 me-3"></i>ดูตำแหน่งบนผังโรงงาน (Layout)
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

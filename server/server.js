@@ -10,6 +10,7 @@ const helmet = require("helmet");
 const {
   setupMQTT,
   liveDataCache,
+  initDailyState
 } = require("./mqttHandler");
 const { authenticateToken } = require("./authMiddleware");
 const userRoutes = require("./userRoutes"); // (สมมติว่าเซฟชื่อไฟล์ว่า userRoutes.js)
@@ -145,6 +146,7 @@ app.get("/api/production/selectData", async (req, res) => {
     if (mhId_All === "true") {
       query += `  SELECT Mh_ID
                         from Machine
+                        WHERE is_active = 1
                         ORDER BY Mh_ID ASC
                     `;
     }
@@ -685,32 +687,253 @@ app.get("/api/production/employee-hourly-report", async (req, res) => {
   }
 });
 
-// API: Factory Layout (ดึงข้อมูลผังโรงงาน)
+// ==========================================
+// API: จัดการข้อมูลเครื่องจักร (Machine Master)
+// ==========================================
+app.get("/api/machines", async (req, res) => {
+    try {
+        const [rows] = await pool.query(`SELECT Mh_ID, is_active FROM Machine ORDER BY Mh_ID ASC`);
+        res.json(rows);
+    } catch (err) {
+        res.status(500).json({ message: "Server Error" });
+    }
+});
+
+app.post("/api/machines", async (req, res) => {
+    const { Mh_ID, is_active } = req.body;
+    try {
+        await pool.query(`INSERT INTO Machine (Mh_ID, is_active) VALUES (?, ?)`, [Mh_ID, is_active]);
+        res.json({ message: "เพิ่มเครื่องจักรสำเร็จ" });
+    } catch (err) {
+        if (err.code === 'ER_DUP_ENTRY') return res.status(400).json({ message: "รหัสเครื่องจักรซ้ำ" });
+        res.status(500).json({ message: "Server Error" });
+    }
+});
+
+app.put("/api/machines/:id", async (req, res) => {
+    const { id } = req.params;
+    const { is_active } = req.body;
+    try {
+        await pool.query(`UPDATE Machine SET is_active = ? WHERE Mh_ID = ?`, [is_active, id]);
+        res.json({ message: "อัปเดตสถานะสำเร็จ" });
+    } catch (err) {
+        res.status(500).json({ message: "Server Error" });
+    }
+});
+
+
+
+
+
+// ==========================================
+// API: ระบบการซ่อมบำรุง (Maintenance & PM)
+// ==========================================
+// 1. ดึงประวัติ PM ทั้งหมด (JOIN กับตาราง Emp เพื่อเอาชื่อช่างมาแสดงผล)
+app.get("/api/maintenance", async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT m.*, e.Emp_Name 
+      FROM Maintenance_Log m
+      LEFT JOIN Emp e ON m.technician_id = e.Emp_ID
+      ORDER BY m.maint_date DESC, m.id DESC
+    `);
+    res.json(rows);
+  } catch (err) {
+    console.error("Maintenance Get Error:", err); 
+    res.status(500).send("Server Error");
+  }
+});
+
+// 2. บันทึกประวัติ PM ใหม่ (บันทึก technician_id ลงฐานข้อมูล)
+app.post("/api/maintenance", async (req, res) => {
+  const { Mh_ID, maint_type, details, technician_id, maint_date } = req.body;
+  try {
+    await pool.query(
+      `INSERT INTO Maintenance_Log (Mh_ID, maint_type, details, technician_id, maint_date) VALUES (?, ?, ?, ?, ?)`,
+      [Mh_ID, maint_type, details, technician_id, maint_date]
+    );
+    res.json({ message: "บันทึกประวัติสำเร็จ" });
+  } catch (err) {
+    console.error("Maintenance Post Error:", err); 
+    res.status(500).send("Server Error");
+  }
+});
+
+// (API ส่วนอื่นๆ ของ
+// 3. ดึงการตั้งค่าเป้าหมาย PM
+app.get("/api/maintenance/settings", async (req, res) => {
+  try {
+    const [rows] = await pool.query(`SELECT * FROM Machine_PM_Setting`);
+    res.json(rows);
+  } catch (err) {
+    console.error("PM Settings Get Error:", err); 
+    res.status(500).send("Server Error");
+  }
+});
+
+// 4. บันทึกหรืออัปเดตการตั้งค่า PM (รองรับช่อง pm_details)
+app.post("/api/maintenance/settings", async (req, res) => {
+  const { Mh_ID, pm_condition, target_value, pm_details } = req.body;
+  try {
+    await pool.query(
+      `INSERT INTO Machine_PM_Setting (Mh_ID, pm_condition, target_value, pm_details) 
+       VALUES (?, ?, ?, ?) 
+       ON DUPLICATE KEY UPDATE 
+         pm_condition = VALUES(pm_condition), 
+         target_value = VALUES(target_value), 
+         pm_details = VALUES(pm_details)`,
+      [Mh_ID, pm_condition, target_value, pm_details]
+    );
+    res.json({ message: "บันทึกการตั้งค่าสำเร็จ" });
+  } catch (err) {
+    console.error("PM Settings Post Error:", err); 
+    res.status(500).send("Server Error");
+  }
+});
+
+// 5. API คำนวณแจ้งเตือน PM Alerts (คำนวณวัน / ชั่วโมง จริงๆ จาก Database)
+app.get("/api/maintenance/alerts", async (req, res) => {
+  try {
+    const [settings] = await pool.query(`
+        SELECT s.* FROM Machine_PM_Setting s
+        JOIN Machine m ON s.Mh_ID = m.Mh_ID
+        WHERE m.is_active = 1
+    `);
+    let alerts = [];
+    
+    for (const s of settings) {
+       // ก. หาว่าเครื่องนี้เคยทำ PM ล่าสุดเมื่อไหร่
+       const [lastPm] = await pool.query(
+         `SELECT maint_date FROM Maintenance_Log WHERE Mh_ID = ? ORDER BY maint_date DESC LIMIT 1`, 
+         [s.Mh_ID]
+       );
+       
+       // ถ้าไม่เคยมีประวัติทำ PM ให้ถือว่าเริ่มนับตั้งแต่วันที่ 1 มกราของปีที่แล้ว
+       let lastPmDate = lastPm.length > 0 ? lastPm[0].maint_date : '2023-01-01'; 
+       
+       let current = 0;
+       let status = 'normal';
+       
+       if (s.pm_condition === 'days') {
+          // 📅 ถ้าตั้งค่าเป็น "วัน" -> คำนวณหาจำนวนวันที่ผ่านมานับจากวันที่ทำ PM ครั้งล่าสุด
+          const [dayDiff] = await pool.query(`SELECT DATEDIFF(NOW(), ?) AS diff`, [lastPmDate]);
+          current = dayDiff[0].diff;
+       } else if (s.pm_condition === 'run_hours') {
+          // ⏱️ ถ้าตั้งค่าเป็น "ชั่วโมง" -> เอาชั่วโมงการทำงานมารวมกันตั้งแต่ทำ PM รอบล่าสุด
+          const [hoursData] = await pool.query(`
+            SELECT SUM(TIMESTAMPDIFF(MINUTE, Start_Time, IFNULL(End_Time, NOW()))) / 60.0 AS total_hrs 
+            FROM production_log 
+            WHERE Mh_ID = ? AND Start_Time >= ?
+          `, [s.Mh_ID, lastPmDate]);
+          
+          current = hoursData[0].total_hrs ? Math.round(hoursData[0].total_hrs) : 0;
+       }
+       
+       // ข. ประเมินสถานะว่าถึงกำหนด PM หรือยัง
+       // (เลยกำหนด = แดง overdue, ใกล้ถึง (90%) = เหลือง warning, ปกติ = เขียว normal)
+       if (current >= s.target_value) {
+         status = 'overdue';
+       } else if (current >= s.target_value * 0.9) { 
+         status = 'warning';
+       }
+       
+       alerts.push({
+         Mh_ID: s.Mh_ID,
+         type: s.pm_condition === 'run_hours' ? 'ชั่วโมงรัน' : 'รอบวัน',
+         current: current,
+         target: s.target_value,
+         status: status
+       });
+    }
+    
+    res.json(alerts);
+  } catch (err) {
+    console.error("PM Alerts Error:", err); 
+    res.status(500).send("Server Error");
+  }
+});
+
+// 6. ลบข้อมูลการตั้งค่ารอบ PM
+app.delete("/api/maintenance/settings/:id", async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [result] = await pool.query(`DELETE FROM Machine_PM_Setting WHERE Mh_ID = ?`, [id]);
+    
+    // เช็คว่ามีข้อมูลถูกลบไปจริงๆ ไหม
+    if (result.affectedRows > 0) {
+      res.json({ message: "ลบการตั้งค่าสำเร็จ" });
+    } else {
+      res.status(404).json({ message: "ไม่พบข้อมูลที่ต้องการลบ" });
+    }
+  } catch (err) {
+    console.error("PM Settings Delete Error:", err); 
+    res.status(500).json({ message: "Server Error" });
+  }
+});
+
+// ==========================================
+// API: ดึงรายชื่อช่าง (Technician & Foreman)
+// ==========================================
+app.get("/api/employees/technicians", async (req, res) => {
+  try {
+    // 📌 ดึงชื่อพนักงาน โดย JOIN กับตาราง Job_Position และกรองเฉพาะ Technician กับ Foreman
+    const [rows] = await pool.query(`
+      SELECT e.Emp_ID, e.Emp_Name, p.Pos_Name 
+      FROM Emp e
+      LEFT JOIN Job_Position p ON e.Pos_id = p.Pos_id
+      WHERE p.Pos_Name LIKE '%Technician%' OR p.Pos_Name LIKE '%Foreman%'
+      ORDER BY e.Emp_Name ASC
+    `);
+    res.json(rows);
+  } catch (err) {
+    console.error("Get Technicians Error:", err);
+    res.status(500).send("Server Error");
+  }
+});
+
+// API: Factory Layout (ดึงข้อมูลผังโรงงาน พร้อมสถานะจาก MQTT)
 // ==========================================
 app.get("/api/layout", async (req, res) => {
   try {
     const [rooms] = await pool.query(`SELECT id, name, pos_x AS x, pos_y AS y, width, height, color FROM Factory_Room`);
     
-    // 📌 ดึงเฉพาะเครื่องจักรที่ถูกจัดลงผังแล้วเท่านั้น (pos_x IS NOT NULL)
-    const [machines] = await pool.query(`
-      SELECT Mh_ID AS id, pos_x AS x, pos_y AS y, scale, 'RUN' AS status 
+    // 📌 1. ดึงข้อมูลเครื่องจักรที่จัดลงผังแล้ว (เอาคำว่า 'RUN' AS status แบบตายตัวออกไป)
+    const [machinesDB] = await pool.query(`
+      SELECT Mh_ID AS id, pos_x AS x, pos_y AS y, scale 
       FROM Machine 
       WHERE is_active = 1 AND pos_x IS NOT NULL
     `);
 
-    res.json({ rooms, machines });
+    // 📌 2. นำพิกัดจาก DB มาจับคู่กับสถานะล่าสุดจาก liveDataCache (MQTT)
+    const machines = machinesDB.map(m => {
+      // ค้นหาข้อมูลของเครื่องนี้จาก cache
+      const mqttData = liveDataCache[m.id]; 
+      
+      return {
+        ...m,
+        // ถ้ามีข้อมูลใน cache และมี status ให้ใช้ค่านั้น ถ้าไม่มีให้ถือว่า 'OFFLINE'
+        status: mqttData && mqttData.status ? mqttData.status : 'OFFLINE',
+        // ถ้ามีการส่งอุณหภูมิ (temp) มาใน MQTT ด้วยก็สามารถพ่วงไปได้เลย
+        temp: mqttData && mqttData.temp ? mqttData.temp : null 
+      };
+    });
+
+    const [walkways] = await pool.query(`SELECT id, pos_x AS x, pos_y AS y, width, height, color FROM Factory_Walkway`);
+    const [doors] = await pool.query(`SELECT id, pos_x AS x, pos_y AS y, width, height, color FROM Factory_Door`);
+
+    // 📌 3. ส่งข้อมูลทั้งหมดกลับไปให้หน้า React
+    res.json({ rooms, machines, walkways, doors });
   } catch (err) {
     console.error("Layout Get Error:", err);
     res.status(500).send("Server Error");
   }
 });
 
-
 // ==========================================
 // API: บันทึกข้อมูลผังโรงงาน (Save Layout)
 // ==========================================
 app.post("/api/layout/save", async (req, res) => {
-  const { rooms, machines } = req.body;
+  const { rooms, machines, walkways, doors } = req.body;
   const connection = await pool.getConnection();
 
   try {
@@ -719,10 +942,8 @@ app.post("/api/layout/save", async (req, res) => {
     // ----------------------------------------------------
     // 1. จัดการเครื่องจักร: ล้างพิกัดทั้งหมดก่อน แล้วค่อยอัปเดตใหม่
     // ----------------------------------------------------
-    // เคลียร์ให้เครื่องจักรทุกตัวหลุดออกจากผังก่อน (ตั้งพิกัดเป็น NULL)
     await connection.query(`UPDATE Machine SET pos_x = NULL, pos_y = NULL`);
     
-    // อัปเดตพิกัดเฉพาะเครื่องที่มีอยู่บนหน้าจอ ณ ปัจจุบัน
     if (machines && machines.length > 0) {
       for (const m of machines) {
         await connection.query(
@@ -747,6 +968,36 @@ app.post("/api/layout/save", async (req, res) => {
       }
     }
 
+    // ----------------------------------------------------
+    // 3. จัดการทางเดิน (Walkways)
+    // ----------------------------------------------------
+    await connection.query(`DELETE FROM Factory_Walkway`);
+    
+    if (walkways && walkways.length > 0) {
+      for (const w of walkways) {
+        await connection.query(
+          `INSERT INTO Factory_Walkway (id, pos_x, pos_y, width, height, color) 
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [w.id, w.x, w.y, w.width, w.height, w.color]
+        );
+      }
+    }
+
+    // ----------------------------------------------------
+    // 4. จัดการประตู (Doors)
+    // ----------------------------------------------------
+    await connection.query(`DELETE FROM Factory_Door`);
+    
+    if (doors && doors.length > 0) {
+      for (const d of doors) {
+        await connection.query(
+          `INSERT INTO Factory_Door (id, pos_x, pos_y, width, height, color) 
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [d.id, d.x, d.y, d.width, d.height, d.color]
+        );
+      }
+    }
+
     await connection.commit();
     res.json({ message: "บันทึกผังโรงงานสำเร็จ!" });
   } catch (err) {
@@ -757,7 +1008,6 @@ app.post("/api/layout/save", async (req, res) => {
     connection.release();
   }
 });
-
 // ==========================================
 // API: จัดการข้อมูลตำแหน่ง (Job Position)
 // ==========================================
@@ -1154,10 +1404,17 @@ async function waitForDatabase() {
 
 // เริ่มการทำงาน: รอ DB พร้อม -> ค่อยเปิดพอร์ต API -> ค่อยเริ่ม MQTT
 waitForDatabase().then(() => {
-  app.listen(PORT, () => {
+  app.listen(PORT,async () => {
     console.log(`🚀 Node.js Server running on http://localhost:${PORT}`);
 
     // เมื่อรัน API ผ่านแล้ว ค่อยให้ MQTT เริ่มทำงาน (เพื่อป้องกัน MQTT เรียกใช้ DB ตอนยังไม่พร้อม)
+
+    try {
+      await initDailyState(); 
+    } catch (err) {
+      console.error("Failed to init daily state:", err);
+    }
+
     setupMQTT();
   });
 });
