@@ -167,6 +167,10 @@ function setupMQTT() {
     const brokerUrl = process.env.MQTT_BROKER_URL || 'mqtt://192.168.4.1:1883';
     const client = mqtt.connect(brokerUrl, { reconnectPeriod: 5000 });
 
+    initDailyState().then(() => {
+        console.log("✅ Server Startup: Initialized Daily Production State");
+    });
+
     client.on('connect', () => {
         console.log('✅ Connected to MQTT Broker successfully!');
 
@@ -480,9 +484,7 @@ cron.schedule('0 0 * * *', async () => {
     timezone: "Asia/Bangkok" // <--- บังคับให้เปรียบเทียบเวลาโดยอิงจากโซนเวลาประเทศไทยเท่านั้น
 });
 
-initDailyState().then(() => {
-    console.log("✅ Server Startup: Initialized Daily Production State");
-});
+
 
 // 📌 บังคับอัปเดตยอดทุกๆ "นาทีที่ 59" ของทุกชั่วโมง (เช่น 08:59, 09:59, 10:59)
 cron.schedule('59 * * * *', async () => {

@@ -78,7 +78,8 @@ function EmployeeMachineReport() {
     // รีเซ็ตการเลือกแถวเมื่อค้นหาข้อมูลใหม่
     setSelectedRow(null); 
     try {
-      const response = await apiFetch(`/api/datalog?date=${reportDate}`);
+      // ✅ เปลี่ยน API เป็น employee-hourly-report เพื่อให้ลอจิกตรงกับกราฟ (ดึงยอดมาครบทุกคน รวมถึงคนที่ไม่ได้ระบุชื่อ)
+      const response = await apiFetch(`/api/production/employee-hourly-report?date=${reportDate}`);
       if (!response.ok) throw new Error('Failed to fetch data');
       
       const rawData = await response.json();
@@ -90,10 +91,9 @@ function EmployeeMachineReport() {
         const empId = item.Emp_ID;
         if (!empId) return;
 
-        const mhId = item.Mh_ID || '-';
-        const start = item.Start_Time ? new Date(item.Start_Time) : null;
-        const hour = start ? String(start.getHours()).padStart(2, '0') : null;
-        const okVal = Number(item.OK) || 0;
+        // ✅ แยกเวลาจาก "08:00" เป็น "08" เพื่อนำมาจับคู่กับ Dropdown
+        const hour = item.hour_slot ? item.hour_slot.split(':')[0] : null;
+        const okVal = Number(item.ok_per_hour) || 0;
 
         if (!hour || hour < startHour || hour > endHour) return;
 
@@ -106,7 +106,11 @@ function EmployeeMachineReport() {
           };
         }
 
-        grouped[empId].machinesSet.add(mhId);
+        // นำเครื่องจักรมาใส่ Set เพื่อไม่ให้แสดงชื่อซ้ำ
+        if (item.machines) {
+          item.machines.split(', ').forEach(m => grouped[empId].machinesSet.add(m));
+        }
+        
         grouped[empId].hourlyData[hour] = (grouped[empId].hourlyData[hour] || 0) + okVal;
         grouped[empId].totalOk += okVal;
       });
@@ -129,6 +133,10 @@ function EmployeeMachineReport() {
       }
 
       finalArray.sort((a, b) => {
+        // ให้กลุ่ม "ไม่ระบุพนักงาน" ไปอยู่ล่างสุด
+        if (a.empId === 'ไม่ระบุพนักงาน') return 1;
+        if (b.empId === 'ไม่ระบุพนักงาน') return -1;
+        
         if (b.machineCount !== a.machineCount) {
           return b.machineCount - a.machineCount;
         }
@@ -182,6 +190,13 @@ function EmployeeMachineReport() {
       csvContent += row.join(",") + "\n";
     });
 
+    // 📌 เพิ่มแถว Grand Total ลงใน Excel
+    let totalRow = ["", "", "รวมทั้งหมด", "", grandTotalOk];
+    hoursList.forEach(h => {
+      totalRow.push(hourlyTotals[h] || 0);
+    });
+    csvContent += totalRow.join(",") + "\n";
+
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
@@ -190,6 +205,13 @@ function EmployeeMachineReport() {
     link.click();
     document.body.removeChild(link);
   };
+
+  // 📌 4. คำนวณยอดรวมทั้งหมด (Grand Totals)
+  const grandTotalOk = reportData.reduce((sum, item) => sum + item.totalOk, 0);
+  const hourlyTotals = {};
+  hoursList.forEach(h => {
+    hourlyTotals[h] = reportData.reduce((sum, item) => sum + (item.hourlyData[h] || 0), 0);
+  });
 
   const allHoursDropdown = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
 
@@ -297,15 +319,14 @@ function EmployeeMachineReport() {
                 </tr>
               ) : (
                 reportData.map((item) => {
-                  // เช็คว่าแถวนี้กำลังถูกคลิกเลือกอยู่หรือไม่
                   const isSelected = selectedRow === item.id;
                   
                   return (
                     <tr 
                       key={item.id} 
-                      onClick={() => setSelectedRow(isSelected ? null : item.id)} // คลิกซ้ำเพื่อยกเลิก
-                      className={isSelected ? "table-primary border-primary" : ""} // เปลี่ยนสีพื้นหลังเป็นสีฟ้าทึบถ้าถูกเลือก
-                      style={{ cursor: "pointer", transition: "background-color 0.2s" }} // เปลี่ยนเมาส์เป็นรูปนิ้วมือ
+                      onClick={() => setSelectedRow(isSelected ? null : item.id)}
+                      className={isSelected ? "table-primary border-primary" : ""}
+                      style={{ cursor: "pointer", transition: "background-color 0.2s" }}
                     >
                       <td className="fw-bold text-muted">{item.id}</td>
                       
@@ -324,7 +345,6 @@ function EmployeeMachineReport() {
                         </span>
                       </td>
                       
-                      {/* เมื่อถูกคลิก สีพื้นหลังจะเป็นไปตาม table-primary เลยไม่บังคับใส่สีเขียวค้างไว้ */}
                       <td className="fw-bold text-success fs-6" style={!isSelected ? { backgroundColor: '#f0fdf4' } : {}}>
                         {item.totalOk.toLocaleString()}
                       </td>
@@ -334,7 +354,6 @@ function EmployeeMachineReport() {
                         return (
                           <td 
                             key={h} 
-                            // ถ้าแถวถูกไฮไลต์ ตัวอักษรสีจะเข้มขึ้นทั้งหมดเพื่อให้อ่านง่าย
                             className={val ? "fw-bold text-primary" : (isSelected ? "text-primary opacity-75" : "text-black-50 opacity-50")} 
                             style={{ padding: '8px 4px' }}
                           >
@@ -347,6 +366,31 @@ function EmployeeMachineReport() {
                 })
               )}
             </tbody>
+            
+            {/* 📌 แถวสรุปยอดรวม (แสดงเมื่อมีข้อมูล) */}
+            {reportData.length > 0 && !loading && (
+              <tfoot className="table-secondary" style={{ position: 'sticky', bottom: 0, zIndex: 2 }}>
+                <tr>
+                  <td colSpan="3" className="text-end pe-4 fw-bold">รวมทั้งหมด</td>
+                  <td className="fw-bold text-success fs-6">
+                    {grandTotalOk.toLocaleString()}
+                  </td>
+                  {hoursList.map(h => {
+                    const totalVal = hourlyTotals[h];
+                    return (
+                      <td 
+                        key={`total-${h}`} 
+                        className={totalVal > 0 ? "fw-bold text-primary" : "text-black-50 opacity-50"} 
+                        style={{ padding: '8px 4px' }}
+                      >
+                        {totalVal > 0 ? totalVal.toLocaleString() : '-'}
+                      </td>
+                    );
+                  })}
+                </tr>
+              </tfoot>
+            )}
+
           </table>
         </div>
       </div>

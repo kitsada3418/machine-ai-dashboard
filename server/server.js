@@ -20,14 +20,17 @@ const app = express();
 app.set("pool", pool);
 
 app.use(helmet());
-const allowedOrigins = process.env.CORS_ORIGINS.split(",").map((s) => s.trim());
-app.use(cors({ origin: allowedOrigins }));
+
+
+const corsOrigins = process.env.VITE_API_URL 
+  ? process.env.VITE_API_URL.split(",").map((s) => s.trim()) 
+  : "*";
+
+app.use(cors({ origin: corsOrigins }));
 app.use(express.json());
 
 app.use("/api", userRoutes);
 //app.use("/api", authenticateToken);
-// เก็บ Cache แยกตาม Mh_ID
-
 
 // สร้างโฟลเดอร์ UpdateFiles แบบเดียวกับ Flask
 const UPLOAD_FOLDER = path.join(__dirname, 'UpdateFiles');
@@ -637,7 +640,7 @@ app.get("/api/production/downtime", async (req, res) => {
 // http://localhost:5000/api/production/downtime?datetime=2026  showe ข้อมูลการหยุดทำงานของเครื่องจักรทั้งหมดของปี 2026
 
 
-// ดึงรายงานสรุปยอดผลิตรายชั่วโมงของพนักงานทั้งหมดใน 1 วัน จากตาราง production_sum
+// ดึงรายงานสรุปยอดผลิตรายชั่วโมงของพนักงานทั้งหมดใน 1 วัน จากตาราง production_sum (เติม 0 ให้ครบ 24 ชม.)
 app.get("/api/production/employee-hourly-report", async (req, res) => {
   try {
     const { date } = req.query; // รับค่ารูปแบบ YYYY-MM-DD
@@ -648,7 +651,16 @@ app.get("/api/production/employee-hourly-report", async (req, res) => {
     const query = `
       WITH OrderedLogs AS (
           SELECT 
-              Emp_ID, Mh_ID, Job_ID, Log_Timestamp, id, OK AS cumulative_count,
+              -- จัดการรหัสพนักงานที่ว่างเปล่า ให้เป็น 'ไม่ระบุพนักงาน'
+              CASE 
+                  WHEN Emp_ID IS NULL OR TRIM(Emp_ID) = '' THEN 'ไม่ระบุพนักงาน'
+                  ELSE TRIM(Emp_ID)
+              END AS Emp_ID,
+              Mh_ID, 
+              Job_ID, 
+              Log_Timestamp, 
+              id, 
+              OK AS cumulative_count,
               LAG(OK) OVER (PARTITION BY Mh_ID, Job_ID ORDER BY Log_Timestamp, id) AS prev_count
           FROM production_sum 
           WHERE DATE_FORMAT(Log_Timestamp, '%Y-%m-%d') = ?
@@ -657,8 +669,7 @@ app.get("/api/production/employee-hourly-report", async (req, res) => {
           SELECT 
               Emp_ID,
               Mh_ID,
-              Log_Timestamp,
-              DATE_FORMAT(Log_Timestamp, '%H') AS hour_slot,
+              DATE_FORMAT(Log_Timestamp, '%H:00') AS hour_slot,
               CASE
                   WHEN prev_count IS NULL THEN cumulative_count
                   WHEN cumulative_count < prev_count THEN cumulative_count
@@ -672,13 +683,57 @@ app.get("/api/production/employee-hourly-report", async (req, res) => {
           hour_slot,
           SUM(actual_diff) AS ok_per_hour
       FROM CalculatedDiff
-      WHERE Emp_ID IS NOT NULL AND Emp_ID != ''
       GROUP BY Emp_ID, hour_slot
-      ORDER BY Emp_ID, hour_slot;
+      ORDER BY 
+          CASE WHEN Emp_ID = 'ไม่ระบุพนักงาน' THEN 1 ELSE 0 END, 
+          Emp_ID, 
+          hour_slot;
     `;
 
     const [rows] = await pool.query(query, [date]);
-    res.json(rows);
+
+    // --- เริ่มกระบวนการ Data Mapping (เหมือน API filter) ---
+    // สร้างช่วงเวลา 24 ชั่วโมง (00:00 - 23:00)
+    const allHours = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0") + ":00");
+    let completeData = [];
+
+    // หาพนักงานทั้งหมดที่มีการผลิตในวันนั้นแบบไม่ซ้ำ
+    const employees = [...new Set(rows.map(row => row.Emp_ID))];
+
+    employees.forEach(empId => {
+      // ดึงข้อมูลเฉพาะของพนักงานคนนี้
+      const empData = rows.filter(r => r.Emp_ID === empId);
+      
+      // รวบรวมรายชื่อเครื่องจักรทั้งหมดที่พนักงานคนนี้ทำในวันนั้น (เอาไว้แสดงในชั่วโมงที่ยอดเป็น 0)
+      const allMachinesSet = new Set();
+      empData.forEach(r => {
+        if (r.machines) {
+          r.machines.split(', ').forEach(m => allMachinesSet.add(m));
+        }
+      });
+      const allMachines = Array.from(allMachinesSet).join(', ');
+
+      // สร้าง Data Map ของพนักงานคนนี้เพื่อเช็คว่าชั่วโมงไหนมีค่า
+      const dataMap = {};
+      empData.forEach(item => {
+        dataMap[item.hour_slot] = {
+           ok_per_hour: item.ok_per_hour,
+           machines: item.machines
+        };
+      });
+
+      // เติมข้อมูลให้พนักงานคนนี้ ครบ 24 ชั่วโมง
+      allHours.forEach(hour => {
+        completeData.push({
+          Emp_ID: empId,
+          machines: dataMap[hour] ? dataMap[hour].machines : allMachines,
+          hour_slot: hour,
+          ok_per_hour: dataMap[hour] ? dataMap[hour].ok_per_hour : "0" // ถ้าไม่มีข้อมูลใส่ "0" เหมือน filter
+        });
+      });
+    });
+
+    res.json(completeData);
   } catch (err) {
     console.error("Employee Hourly Report Error:", err);
     res.status(500).send("Server Error");
