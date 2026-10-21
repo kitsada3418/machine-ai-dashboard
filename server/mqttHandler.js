@@ -465,7 +465,10 @@ cron.schedule('0 0 * * *', async () => {
     console.log('[Cron Job] Midnight Reset: Clearing daily production cache...');
 
     // 1. ล้างตัวแปร State
-    dailyProductionState = {};
+    for (let key in dailyProductionState) {
+        delete dailyProductionState[key];
+    }
+    //dailyProductionState = {};
 
     // 2. รีเซ็ตยอด total_day
     for (const mhId in liveDataCache) {
