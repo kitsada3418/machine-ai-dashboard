@@ -44,3 +44,103 @@ SET time_zone = '+07:00';
 
 SELECT NOW(), CURDATE();
 
+////////////////////////////////////////////////////////////////////
+
+ALTER TABLE Machine 
+ADD COLUMN pos_x INT DEFAULT 100,
+ADD COLUMN pos_y INT DEFAULT 100,
+ADD COLUMN scale FLOAT DEFAULT 1.0;
+
+
+-- 2. สร้างตารางใหม่สำหรับเก็บข้อมูลห้อง (Rooms)
+CREATE TABLE Factory_Room (
+    id VARCHAR(50) PRIMARY KEY,
+    name VARCHAR(100),
+    pos_x INT DEFAULT 50,
+    pos_y INT DEFAULT 50,
+    width INT DEFAULT 350,
+    height INT DEFAULT 250,
+    color VARCHAR(20) DEFAULT '#f1f5f9'
+);
+
+
+-- 1. สร้างตารางบันทึกประวัติซ่อมบำรุง
+CREATE TABLE IF NOT EXISTS Maintenance_Log (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    Mh_ID VARCHAR(50) NOT NULL,
+    maint_type VARCHAR(100) NOT NULL,
+    details TEXT,
+    technician_name VARCHAR(100),
+    maint_date DATE NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 2. สร้างตารางการตั้งค่ารอบ PM
+CREATE TABLE IF NOT EXISTS Machine_PM_Setting (
+    Mh_ID VARCHAR(50) PRIMARY KEY,
+    pm_condition VARCHAR(20) NOT NULL,
+    target_value INT NOT NULL,
+    pm_details TEXT
+);
+
+
+-- 1. เปลี่ยนชื่อคอลัมน์ และปรับชนิดข้อมูลให้รองรับรหัสพนักงาน (Emp_ID)
+ALTER TABLE Maintenance_Log CHANGE COLUMN technician_name technician_id VARCHAR(50) NOT NULL;
+
+-- 2. (แนะนำ) ผูก Foreign Key เชื่อมกับตาราง Emp (หากตาราง Emp มีคอลัมน์ Emp_ID เป็น Primary Key อยู่แล้ว)
+ALTER TABLE Maintenance_Log 
+ADD CONSTRAINT fk_maint_technician 
+FOREIGN KEY (technician_id) REFERENCES Emp(Emp_ID) 
+ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+-- =======================================================
+-- 6. ตารางข้อมูลห้องสำหรับผังโรงงาน (Factory_Room)
+-- =======================================================
+CREATE TABLE IF NOT EXISTS Factory_Room (
+    id VARCHAR(50) PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    pos_x FLOAT NOT NULL,
+    pos_y FLOAT NOT NULL,
+    width FLOAT NOT NULL,
+    height FLOAT NOT NULL,
+    color VARCHAR(50) DEFAULT '#f8fafc'
+);
+
+-- =======================================================
+-- 7. ตารางข้อมูลทางเดินสำหรับผังโรงงาน (Factory_Walkway)
+-- =======================================================
+CREATE TABLE IF NOT EXISTS Factory_Walkway (
+    id VARCHAR(50) PRIMARY KEY,
+    pos_x FLOAT NOT NULL,
+    pos_y FLOAT NOT NULL,
+    width FLOAT NOT NULL,
+    height FLOAT NOT NULL,
+    color VARCHAR(50) DEFAULT '#e2e8f0'
+);
+
+-- =======================================================
+-- 8. ตารางข้อมูลประตูสำหรับผังโรงงาน (Factory_Door)
+-- =======================================================
+CREATE TABLE IF NOT EXISTS Factory_Door (
+    id VARCHAR(50) PRIMARY KEY,
+    pos_x FLOAT NOT NULL,
+    pos_y FLOAT NOT NULL,
+    width FLOAT NOT NULL,
+    height FLOAT NOT NULL,
+    color VARCHAR(50) DEFAULT '#78350f'
+);
+
+
+-- สร้างตารางเก็บรหัสผ่านการตั้งค่า
+CREATE TABLE IF NOT EXISTS Machine_Auth (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    auth_type VARCHAR(50) NOT NULL COMMENT 'ประเภท เช่น CONFIRM หรือ ADMIN',
+    auth_code VARCHAR(50) NOT NULL COMMENT 'รหัสผ่าน',
+    description VARCHAR(100) COMMENT 'คำอธิบาย'
+);
+
+-- เพิ่มข้อมูลเริ่มต้น (Seed Data)
+INSERT INTO Machine_Auth (auth_type, auth_code, description) VALUES 
+('CONFIRM', '210112', 'รหัสยืนยันการตั้งค่าทั่วไป'),
+('ADMIN', '210112', 'รหัสผู้ดูแลระบบ');

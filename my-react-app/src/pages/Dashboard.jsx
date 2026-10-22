@@ -444,8 +444,8 @@ function Dashboard() {
                         <table className="table table-hover align-middle mb-0">
                             <thead className="table-light">
                                 <tr
-                                    className="text-center align-middle text-muted small fw-bold"
-                                    style={{ letterSpacing: '0.5px' }}
+                                    className="text-center align-middle text-muted fw-bold"
+                                    style={{ letterSpacing: '0.5px' , fontSize: '16px'}}
                                 >
                                     <th className="py-3">MACHINE</th>
                                     <th>STATUS</th>
@@ -520,7 +520,7 @@ function Dashboard() {
                                             <td className="fw-bold text-primary">
                                                 {item.status === 'stop' ? '-' : item.customer || '-'}
                                             </td>
-                                            <td className="fw-bold" style={{ color: '#f37208' }}>
+                                            <td className="fw-bold" style={{ color: '#f37208' }} >
                                                 {item.status === 'stop' ? '-' : item.job_id || '-'}
                                             </td>
 

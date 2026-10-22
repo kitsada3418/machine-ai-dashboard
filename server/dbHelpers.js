@@ -92,15 +92,24 @@ async function ensureTerminal(tName_) {
     }
 
     try {
-        let [rows] = await pool.execute('SELECT T_ID FROM Terminal_size WHERE T_Name = ?', [tName]);
+        // 1. ค้นหา T_ID โดยไม่สนว่า is_active จะเป็น 0 หรือ 1
+        let [rows] = await pool.execute('SELECT T_ID, is_active FROM Terminal_size WHERE T_Name = ?', [tName]);
+        
         if (rows.length > 0) {
             const tId = rows[0].T_ID;
+            
+            // 📌 ถ้าพบว่าเคยถูกซ่อนไว้ (is_active = 0) ให้ปลุกชีพกลับมาเป็น 1
+            if (rows[0].is_active === 0) {
+                await pool.execute('UPDATE Terminal_size SET is_active = 1 WHERE T_ID = ?', [tId]);
+                console.log(`[Restore] Terminal: ${tName} (ID: ${tId}) reactivated.`);
+            }
+
             terminalCache.set(tName, tId);
             return tId;
         }
         
-        // ถ้าตารางเป็น AUTO_INCREMENT แนะนำให้ใช้ตัวนี้ (ไม่ต้องหา MAX เอง ปลอดภัยที่สุด)
-        let [result] = await pool.execute('INSERT INTO Terminal_size (T_Name) VALUES (?)', [tName]);
+        // 2. ถ้าไม่เคยมีเลย ให้ INSERT ใหม่
+        let [result] = await pool.execute('INSERT INTO Terminal_size (T_Name, is_active) VALUES (?, 1)', [tName]);
         const tId = result.insertId;
         
         terminalCache.set(tName, tId);
@@ -113,6 +122,8 @@ async function ensureTerminal(tName_) {
             let [rows] = await pool.execute('SELECT T_ID FROM Terminal_size WHERE T_Name = ?', [tName]);
             if (rows.length > 0) {
                 const tId = rows[0].T_ID;
+                // บังคับอัปเดตให้ active ชัวร์ๆ
+                await pool.execute('UPDATE Terminal_size SET is_active = 1 WHERE T_ID = ?', [tId]);
                 terminalCache.set(tName, tId);
                 return tId;
             }
