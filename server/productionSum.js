@@ -30,7 +30,7 @@ async function updateProductionSum(machineId, data) {
                 VALUES (?, ?, ?, ?, ?, ?)
             `;
             await pool.execute(insertQuery, [logTime, data.job_id, data.emp_id, data.mh_id, data.ok, data.ng]);
-            console.log(`[Sum Inserted - New Hour] Machine: ${machineId}`);
+           // console.log(`[Sum Inserted - New Hour] Machine: ${machineId}`);
             
         } else {
             const latestRecord = rows[0];
@@ -42,7 +42,7 @@ async function updateProductionSum(machineId, data) {
                     VALUES (?, ?, ?, ?, ?, ?)
                 `;
                 await pool.execute(insertQuery, [logTime, data.job_id, data.emp_id, data.mh_id, data.ok, data.ng]);
-                console.log(`[Sum Inserted - Job Reset] Machine: ${machineId}`);
+               // console.log(`[Sum Inserted - Job Reset] Machine: ${machineId}`);
                 
             } else {
                 // กรณีที่ 3: ยอดเพิ่มขึ้นปกติ -> อัปเดตทับแถวเดิม (UPDATE) อ้างอิงตาม id ล่าสุด
@@ -53,7 +53,7 @@ async function updateProductionSum(machineId, data) {
                 `;
                 // อัปเดต emp_id ด้วย เผื่อมีการเปลี่ยนพนักงานระหว่างรันจ๊อบ
                 await pool.execute(updateQuery, [data.ok, data.ng, data.emp_id, latestRecord.id]);
-                console.log(`[Sum Updated - Normal] Machine: ${machineId}`);
+               // console.log(`[Sum Updated - Normal] Machine: ${machineId}`);
             }
         }
 

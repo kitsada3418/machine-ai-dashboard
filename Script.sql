@@ -92,3 +92,55 @@ ALTER TABLE Maintenance_Log
 ADD CONSTRAINT fk_maint_technician 
 FOREIGN KEY (technician_id) REFERENCES Emp(Emp_ID) 
 ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+-- =======================================================
+-- 6. ตารางข้อมูลห้องสำหรับผังโรงงาน (Factory_Room)
+-- =======================================================
+CREATE TABLE IF NOT EXISTS Factory_Room (
+    id VARCHAR(50) PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    pos_x FLOAT NOT NULL,
+    pos_y FLOAT NOT NULL,
+    width FLOAT NOT NULL,
+    height FLOAT NOT NULL,
+    color VARCHAR(50) DEFAULT '#f8fafc'
+);
+
+-- =======================================================
+-- 7. ตารางข้อมูลทางเดินสำหรับผังโรงงาน (Factory_Walkway)
+-- =======================================================
+CREATE TABLE IF NOT EXISTS Factory_Walkway (
+    id VARCHAR(50) PRIMARY KEY,
+    pos_x FLOAT NOT NULL,
+    pos_y FLOAT NOT NULL,
+    width FLOAT NOT NULL,
+    height FLOAT NOT NULL,
+    color VARCHAR(50) DEFAULT '#e2e8f0'
+);
+
+-- =======================================================
+-- 8. ตารางข้อมูลประตูสำหรับผังโรงงาน (Factory_Door)
+-- =======================================================
+CREATE TABLE IF NOT EXISTS Factory_Door (
+    id VARCHAR(50) PRIMARY KEY,
+    pos_x FLOAT NOT NULL,
+    pos_y FLOAT NOT NULL,
+    width FLOAT NOT NULL,
+    height FLOAT NOT NULL,
+    color VARCHAR(50) DEFAULT '#78350f'
+);
+
+
+-- สร้างตารางเก็บรหัสผ่านการตั้งค่า
+CREATE TABLE IF NOT EXISTS Machine_Auth (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    auth_type VARCHAR(50) NOT NULL COMMENT 'ประเภท เช่น CONFIRM หรือ ADMIN',
+    auth_code VARCHAR(50) NOT NULL COMMENT 'รหัสผ่าน',
+    description VARCHAR(100) COMMENT 'คำอธิบาย'
+);
+
+-- เพิ่มข้อมูลเริ่มต้น (Seed Data)
+INSERT INTO Machine_Auth (auth_type, auth_code, description) VALUES 
+('CONFIRM', '210112', 'รหัสยืนยันการตั้งค่าทั่วไป'),
+('ADMIN', '210112', 'รหัสผู้ดูแลระบบ');

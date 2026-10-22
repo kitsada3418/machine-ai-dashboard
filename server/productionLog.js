@@ -61,7 +61,7 @@ async function saveProductionLog(machineId, data) {
             dataConvert.status
         ];
         await pool.execute(query, values);
-        //console.log(`[DB Saved] Job: ${dataConvert.job_id} | Machine: ${dataConvert.mh_id}`);
+        console.log(`[DB Saved ProductionLog] Job: ${dataConvert.job_id} | Machine: ${dataConvert.mh_id}`);
     } catch (err) {
         console.error(`[DB Error] saveProductionLog:`, err.message);
     }   

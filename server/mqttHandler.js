@@ -44,7 +44,7 @@ async function saveDowntimeLog(empId, mhId, startTime, endTime) {
             formatSqlDate(endTime)
         ]);
 
-        console.log(`[Downtime Saved] Machine: ${mhId} | Emp: ${empId} | Start: ${new Date(startTime).toLocaleTimeString()} | End: ${new Date(endTime).toLocaleTimeString()}`);
+        //console.log(`[Downtime Saved] Machine: ${mhId} | Emp: ${empId} | Start: ${new Date(startTime).toLocaleTimeString()} | End: ${new Date(endTime).toLocaleTimeString()}`);
     } catch (err) {
         console.error(`[DB Error] saveDowntimeLog Machine: ${mhId} :`, err.message);
     }
@@ -60,11 +60,11 @@ function startDowntimeMonitor() {
             if (!live) continue;                                                        // ถ้าไม่มีข้อมูลล่าสุดของเครื่องจักรนี้ ให้ข้ามไป
 
             if (now - live.last_update > OFFLINE_THRESHOLD_MS) {
-                console.log(`⚠️ ตรวจพบเครื่อง ${machineId} หยุดส่งข้อมูลเกิน ${OFFLINE_THRESHOLD_MS / 1000} วินาที`);
+                //console.log(`⚠️ ตรวจพบเครื่อง ${machineId} หยุดส่งข้อมูลเกิน ${OFFLINE_THRESHOLD_MS / 1000} วินาที`);
                 liveDataCache[machineId].status = "OFFLINE";                            // อัปเดตสถานะเป็น OFFLINE
                 if (machineTrackers[machineId]) {
                     delete machineTrackers[machineId];
-                    console.log(`🗑️ ลบ Tracker ของเครื่อง ${machineId} เพราะเครื่องหยุดส่งข้อมูลเกิน ${OFFLINE_THRESHOLD_MS / 1000} วินาที`);
+                    //console.log(`🗑️ ลบ Tracker ของเครื่อง ${machineId} เพราะเครื่องหยุดส่งข้อมูลเกิน ${OFFLINE_THRESHOLD_MS / 1000} วินาที`);
 
                     // 🧹 สั่งล้างข้อมูลอื่นๆ ให้เป็นค่าว่างหรือ 0 เพื่อเคลียร์หน้าจอ Dashboard
                     liveDataCache[machineId].emp_id = "-";
@@ -87,7 +87,7 @@ function startDowntimeMonitor() {
                     tracker.lastChangeTime = now;                                           // อัปเดตเวลาล่าสุดที่เครื่องถูกเห็น
                     tracker.lastTotal = 0;                                                  // รีเซ็ตยอดรวมล่าสุด
                     tracker.emp_id = null;                                                  // รีเซ็ต Emp_ID เพราะเครื่องไม่ส่งข้อมูล
-                    console.log(`⚠️ รีเซ็ตสถานะ Downtime ของเครื่อง ${machineId} เพราะเครื่องไม่ส่งข้อมูล (สถานะ: ${live.status})`);
+                    //console.log(`⚠️ รีเซ็ตสถานะ Downtime ของเครื่อง ${machineId} เพราะเครื่องไม่ส่งข้อมูล (สถานะ: ${live.status})`);
                     continue;                                                               // ข้ามเครื่องจักรนี้ไป
                 }
             }
@@ -100,7 +100,7 @@ function startDowntimeMonitor() {
                 tracker.isDown = true;
                 // เวลาเริ่มหยุด คือเวลาที่ยอดเริ่มนิ่งไปครั้งสุดท้าย
                 tracker.downtimeStart = tracker.lastChangeTime;
-                console.log(`⏱️ ตรวจพบเครื่อง ${machineId} หยุดทำงานเกิน ${FIVE_MINUTES} นาที (เริ่มหยุดตั้งแต่: ${new Date(tracker.downtimeStart).toLocaleTimeString()})`);
+                //console.log(`⏱️ ตรวจพบเครื่อง ${machineId} หยุดทำงานเกิน ${FIVE_MINUTES} นาที (เริ่มหยุดตั้งแต่: ${new Date(tracker.downtimeStart).toLocaleTimeString()})`);
             }
         }
     }, 30000); // เช็คทุก 30 วินาที
@@ -131,33 +131,36 @@ function startSumSnapshotTimer() {
     }
 
     async function updateSumSnapshot() {
-        for (const [machineId] of Object.entries(liveDataCache)) {
+        console.log(`⏱️ [Snapshot] บันทึกยอดรวมล่าสุดของเครื่องจักรทุกเครื่อง (ทุก ${SNAPSHOT_INTERVAL_MINUTES} นาที)`);
+        const entries = Object.entries(liveDataCache);
+        const chunkSize = 10; // 📌 หั่นทำทีละ 10 เครื่อง
 
-            const data_ = liveDataCache[machineId];                                             // ดึงข้อมูลล่าสุดของเครื่องจักรนี้จาก Cache
-            if (data_.job_id === '' || data_.job_id === null || data_.job_id === undefined) {   // ถ้าเครื่องจักรนี้ยังไม่มี Job ID ให้ข้ามไป
-                continue;
-            }
+        for (let i = 0; i < entries.length; i += chunkSize) {
+            const chunk = entries.slice(i, i + chunkSize);
 
-            if (data_.ok === 0 && data_.ng === 0) {                                             // ถ้ายอด OK และ NG เป็น 0 ให้ข้ามไป (ไม่บันทึกยอด 0)
-                continue;
-            }
+            // ใช้ Promise.all เพื่อให้ใน 1 ก้อน (10 เครื่อง) ทำงานขนานกัน ช่วยให้เสร็จไวขึ้น
+            await Promise.all(chunk.map(async ([machineId, data_]) => {
+                if (!data_ || data_.job_id === '' || data_.job_id === null || data_.job_id === undefined) return;
+                if (data_.ok === 0 && data_.ng === 0) return;
 
-            try {
-                // บังคับรอจนกว่าจะ Insert ลงตาราง Master Data เสร็จ
-                await ensureEmp(data_.emp_id);
-                await ensureMachine(data_.mh_id);
-                await ensureCustomer(data_.customer);
+                try {
+                    await ensureEmp(data_.emp_id);
+                    await ensureMachine(data_.mh_id);
+                    await ensureCustomer(data_.customer);
+                    
+                    await updateProductionSum(machineId, data_).catch(err => {
+                        console.error('[Snapshot Error]', err.message);
+                    });
+                    
+                } catch (err) {
+                    console.error(`[Snapshot Error] Machine ${machineId}:`, err.message);
+                }
+            }));
 
-                // บันทึกลงตาราง Sum
-                await updateProductionSum(machineId, data_).catch(err => {
-                    console.error('[Snapshot Error]', err.message);
-                });
-
-
-            } catch (err) {
-                console.error(`[Snapshot Error] Machine ${machineId}:`, err.message);
-            }
+            // 📌 จุดสำคัญ: คืนพื้นที่ให้ Event Loop หายใจสักนิด ก่อนทำ 10 เครื่องรอบถัดไป
+            await new Promise(resolve => setTimeout(resolve, 50)); 
         }
+        console.log(`✅ [Snapshot] บันทึกยอดรวมล่าสุดของเครื่องจักรครบทุกเครื่องแล้ว`);
     }
 
     scheduleNext();
@@ -199,15 +202,16 @@ function setupMQTT() {
                 if (oldData.status === 'RUN') {                                 // เฉพาะเครื่องที่กำลัง RUN เท่านั้นถึงจะเช็ก
                     if (oldData.job_id !== data.job_id) {                       // ถ้า Job ID เปลี่ยนแสดงว่าเครื่องเปลี่ยนจ๊อบ
 
-                        console.log(`[ตรวจพบว่าเครื่อง ${machineId} เปลี่ยนจ๊อบ! กำลังเซฟยอดสุดท้ายของจ๊อบเก่า.`);
+                        //console.log(`[ตรวจพบว่าเครื่อง ${machineId} เปลี่ยนจ๊อบ! กำลังเซฟยอดสุดท้ายของจ๊อบเก่า.`);
                         if (!oldData.job_id) {
-                            console.log(`⚠️ เครื่อง ${machineId} เปลี่ยนจ๊อบ แต่ Job ID เก่าของเครื่องเป็นค่าว่าง (ไม่บันทึกยอด)`);
+                           // console.log(`⚠️ เครื่อง ${machineId} เปลี่ยนจ๊อบ แต่ Job ID เก่าของเครื่องเป็นค่าว่าง (ไม่บันทึกยอด)`);
                         }
                         else {
-                            console.log(`🔄 เครื่อง ${machineId} เปลี่ยนจ๊อบจาก ${oldData.job_id} → ${data.job_id} (บันทึกยอดสุดท้ายของจ๊อบเก่า)`);
+                           // console.log(`🔄 เครื่อง ${machineId} เปลี่ยนจ๊อบจาก ${oldData.job_id} → ${data.job_id} (บันทึกยอดสุดท้ายของจ๊อบเก่า)`);
                             updateProductionSum(machineId, oldData).catch(err => {  // บันทึกยอดสุดท้ายของจ๊อบเก่า
                                 console.error('[saveLog Error]', err.message);
                             });
+                            console.log(`✅ บันทึกยอดสุดท้ายของจ๊อบเก่า ${oldData.job_id} ของเครื่อง ${machineId} เรียบร้อยแล้ว`);
                         }
                     }
                 }
@@ -229,17 +233,17 @@ function setupMQTT() {
                         isDown: false,
                         emp_id: null,
                     };
-                    console.log(`🆕 สร้าง Tracker ใหม่สำหรับเครื่อง ${machineId}`);
+                    //console.log(`🆕 สร้าง Tracker ใหม่สำหรับเครื่อง ${machineId}`);
                 }
 
                 if (data.job_id === '' && data.status === 'RUN') {
                     if (machineTrackers[machineId]) {
                         machineTrackers[machineId].lastChangeTime = now;           // อัปเดตเวลาล่าสุดที่ยอดขยับ
                         machineTrackers[machineId].isDown = false;                  // รีเซ็ตสถานะ Downtime เพราะเครื่องกำลัง RUN
-                        console.log(`⚠️ รีเซ็ตสถานะ Downtime ของเครื่อง ${machineId} เพราะเครื่องกำลัง RUN แต่ Job ID เป็นค่าว่าง`);
+                        //console.log(`⚠️ รีเซ็ตสถานะ Downtime ของเครื่อง ${machineId} เพราะเครื่องกำลัง RUN แต่ Job ID เป็นค่าว่าง`);
                     }
                     data.status = 'STOP';                          // อัปเดตสถานะเป็น RUN
-                    console.log(`⚠️ รีเซ็ตสถานะของเครื่อง ${machineId} เป็น STOP เพราะ Job ID เป็นค่าว่าง`);
+                   // console.log(`⚠️ รีเซ็ตสถานะของเครื่อง ${machineId} เป็น STOP เพราะ Job ID เป็นค่าว่าง`);
                 }
 
                 const tracker = machineTrackers[machineId];
@@ -254,10 +258,10 @@ function setupMQTT() {
                         // รีเซ็ตสถานะกลับมาปกติ
                         tracker.isDown = false;
                         tracker.downtimeStart = null;
-                        console.log(`✅ เครื่อง ${machineId} กลับมาทำงานปกติแล้ว (ยอดรวมเพิ่มขึ้นจาก ${tracker.lastTotal} → ${currentTotal})`);
+                        //console.log(`✅ เครื่อง ${machineId} กลับมาทำงานปกติแล้ว (ยอดรวมเพิ่มขึ้นจาก ${tracker.lastTotal} → ${currentTotal})`);
 
                     }
-                    console.log(`🔄 เครื่อง ${machineId} กำลังทำงานปกติ (ยอดรวมเพิ่มขึ้นจาก ${tracker.lastTotal} → ${currentTotal})`);
+                    //console.log(`🔄 เครื่อง ${machineId} กำลังทำงานปกติ (ยอดรวมเพิ่มขึ้นจาก ${tracker.lastTotal} → ${currentTotal})`);
                     // อัปเดตยอดใหม่และเวลาล่าสุดที่ยอดขยับ
                     tracker.lastTotal = currentTotal;
                     tracker.lastChangeTime = now;
@@ -301,7 +305,7 @@ function setupMQTT() {
                 const ngVal = parseInt(data.NG || 0);
 
                 if (okVal === 0 && ngVal === 0) {
-                    console.log(`OK or NG = 0  is not save`)
+                    //console.log(`OK or NG = 0  is not save`)
                     return;
                 }
 
@@ -458,64 +462,71 @@ function processMqttRealtime(mhId, jobId, incomingOk) {
 }
 
 cron.schedule('0 0 * * *', async () => {
-    console.log('[Cron Job] Midnight Reset: Clearing daily production cache...');
+    // 📌 หน่วงเวลา 5 วินาที ให้ชัวร์ว่าคิวของ 23:59 ทำงานเคลียร์ลง DB เสร็จสนิทแล้ว
+    setTimeout(async () => {
+        console.log('[Cron Job] Midnight Reset: Clearing daily production cache...');
 
-    // 1. ล้างตัวแปร State
-    dailyProductionState = {};
+        // 1. ล้างตัวแปร State
+        dailyProductionState = {};
 
-    // 2. รีเซ็ตยอด total_day
-    for (const mhId in liveDataCache) {
-        if (liveDataCache[mhId]) {
-            liveDataCache[mhId].total_day = 0;
+
+        // 2. รีเซ็ตยอด total_day
+        for (const mhId in liveDataCache) {
+            if (liveDataCache[mhId]) {
+                liveDataCache[mhId].total_day = 0;
+            }
         }
-    }
 
-    // 3. ดึงข้อมูลตั้งต้นใหม่
-    await initDailyState();
+        // 3. ดึงข้อมูลตั้งต้นใหม่
+        await initDailyState();
 
-    console.log('[Cron Job] Midnight Reset: Successfully cleared!');
+        console.log('[Cron Job] Midnight Reset: Successfully cleared!');
+    }, 5000); // ดีเลย์ 5000 ms (5 วินาที)
 
 }, {
     scheduled: true,
-    timezone: "Asia/Bangkok" // <--- บังคับให้เปรียบเทียบเวลาโดยอิงจากโซนเวลาประเทศไทยเท่านั้น
+    timezone: "Asia/Bangkok"
 });
-
-//initDailyState().then(() => {
-//    console.log("✅ Server Startup: Initialized Daily Production State");
-//});
 
 // 📌 บังคับอัปเดตยอดทุกๆ "นาทีที่ 59" ของทุกชั่วโมง (เช่น 08:59, 09:59, 10:59)
 cron.schedule('59 * * * *', async () => {
+//cron.schedule('*/30 * * * * *', async () => {
     console.log('⏰ [Cron Job] Hourly Flush: บังคับอัปเดตยอดก่อนตัดชั่วโมง...');
 
-    // วนลูปดึงข้อมูลเครื่องจักรทั้งหมดที่มีใน Cache ปัจจุบัน
-    for (const [machineId, data_] of Object.entries(liveDataCache)) {
+    const entries = Object.entries(liveDataCache);
+    const chunkSize = 10; // 📌 หั่นทำทีละ 10 เครื่องเพื่อไม่ให้โหลดหนักเกินไป
 
-        // ข้ามเครื่องที่ยังไม่มี Job หรือยังไม่ได้ผลิต (ยอด 0)
-        if (!data_.job_id || data_.job_id === '-' || (data_.ok === 0 && data_.ng === 0)) {
-            continue;
-        }
+    for (let i = 0; i < entries.length; i += chunkSize) {
+        const chunk = entries.slice(i, i + chunkSize);
 
-        try {
-            // บังคับตรวจสอบ Master Data ก่อน
-            await ensureEmp(data_.emp_id);
-            await ensureMachine(data_.mh_id);
-            await ensureCustomer(data_.customer);
+        await Promise.all(chunk.map(async ([machineId, data_]) => {
+            if (!data_ || !data_.job_id || data_.job_id === '-' || (data_.ok === 0 && data_.ng === 0)) {
+                return;
+            }
 
-            // บังคับเซฟลงตาราง production_sum ด้วยข้อมูลล่าสุด ณ นาทีที่ 59
-            await updateProductionSum(machineId, data_).catch(err => {
-                console.error('[Hourly Flush DB Error]', err.message);
-            });
+            try {
+                await ensureEmp(data_.emp_id);
+                await ensureMachine(data_.mh_id);
+                await ensureCustomer(data_.customer);
 
-        } catch (err) {
-            console.error(`[Hourly Flush Error] Machine ${machineId}:`, err.message);
-        }
+                await updateProductionSum(machineId, data_).catch(err => {
+                    console.error('[Hourly Flush DB Error]', err.message);
+                });
+            } catch (err) {
+                console.error(`[Hourly Flush Error] Machine ${machineId}:`, err.message);
+            }
+        }));
+
+        // 📌 จุดสำคัญ: เว้นจังหวะให้ CPU ว่างเพื่อไปรันคิวอื่นๆ ในระบบไม่ให้บล็อก
+        await new Promise(resolve => setTimeout(resolve, 50));
     }
+    
+    
     console.log('✅ [Cron Job] Hourly Flush: อัปเดตยอดครบทุกเครื่องเสร็จสิ้น');
 
 }, {
     scheduled: true,
-    timezone: "Asia/Bangkok" // อิงเวลาไทยเสมอ
+    timezone: "Asia/Bangkok" 
 });
 
 

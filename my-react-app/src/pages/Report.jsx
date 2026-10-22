@@ -5,7 +5,7 @@ function EmployeeMachineReport() {
   const [reportDate, setReportDate] = useState(new Date().toISOString().split('T')[0]);
   
   const [startHour, setStartHour] = useState('07');
-  const [endHour, setEndHour] = useState('22');
+  const [endHour, setEndHour] = useState('21');
   
   const [filterEmp, setFilterEmp] = useState('all');
   const [filterMachine, setFilterMachine] = useState('all');
@@ -21,6 +21,10 @@ function EmployeeMachineReport() {
 
   // 📌 State สำหรับเก็บ ID ของแถวที่ถูกคลิกเลือก (เพื่อทำไฮไลต์)
   const [selectedRow, setSelectedRow] = useState(null);
+
+  // 📌 State สำหรับ Pagination (แบ่งหน้า)
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 15;
 
   const getHoursRange = (start, end) => {
     const s = parseInt(start, 10);
@@ -75,10 +79,10 @@ function EmployeeMachineReport() {
   // 2. ดึงข้อมูลตารางการผลิต
   const fetchReportData = async () => {
     setLoading(true);
-    // รีเซ็ตการเลือกแถวเมื่อค้นหาข้อมูลใหม่
+    // รีเซ็ตการเลือกแถว และกลับไปหน้าแรก เมื่อค้นหาข้อมูลใหม่
     setSelectedRow(null); 
+    setCurrentPage(1);
     try {
-      // ✅ เปลี่ยน API เป็น employee-hourly-report เพื่อให้ลอจิกตรงกับกราฟ (ดึงยอดมาครบทุกคน รวมถึงคนที่ไม่ได้ระบุชื่อ)
       const response = await apiFetch(`/api/production/employee-hourly-report?date=${reportDate}`);
       if (!response.ok) throw new Error('Failed to fetch data');
       
@@ -91,7 +95,6 @@ function EmployeeMachineReport() {
         const empId = item.Emp_ID;
         if (!empId) return;
 
-        // ✅ แยกเวลาจาก "08:00" เป็น "08" เพื่อนำมาจับคู่กับ Dropdown
         const hour = item.hour_slot ? item.hour_slot.split(':')[0] : null;
         const okVal = Number(item.ok_per_hour) || 0;
 
@@ -106,7 +109,6 @@ function EmployeeMachineReport() {
           };
         }
 
-        // นำเครื่องจักรมาใส่ Set เพื่อไม่ให้แสดงชื่อซ้ำ
         if (item.machines) {
           item.machines.split(', ').forEach(m => grouped[empId].machinesSet.add(m));
         }
@@ -133,7 +135,6 @@ function EmployeeMachineReport() {
       }
 
       finalArray.sort((a, b) => {
-        // ให้กลุ่ม "ไม่ระบุพนักงาน" ไปอยู่ล่างสุด
         if (a.empId === 'ไม่ระบุพนักงาน') return 1;
         if (b.empId === 'ไม่ระบุพนักงาน') return -1;
         
@@ -168,7 +169,8 @@ function EmployeeMachineReport() {
     let csvContent = "data:text/csv;charset=utf-8,\uFEFF";
     
     let headers = ["ลำดับ", "รหัสพนักงาน", "ชื่อพนักงาน", "เครื่องจักร", "รวม (OK)"];
-    hoursList.forEach(h => headers.push(`${parseInt(h, 10)}.00`));
+    // 📌 แก้ไขฟอร์แมตเวลาหัวตารางใน Excel เป็น :00 เช่น 8:00
+    hoursList.forEach(h => headers.push(`${parseInt(h, 10)}:00`));
     csvContent += headers.join(",") + "\n";
 
     reportData.forEach(item => {
@@ -190,7 +192,6 @@ function EmployeeMachineReport() {
       csvContent += row.join(",") + "\n";
     });
 
-    // 📌 เพิ่มแถว Grand Total ลงใน Excel
     let totalRow = ["", "", "รวมทั้งหมด", "", grandTotalOk];
     hoursList.forEach(h => {
       totalRow.push(hourlyTotals[h] || 0);
@@ -212,6 +213,12 @@ function EmployeeMachineReport() {
   hoursList.forEach(h => {
     hourlyTotals[h] = reportData.reduce((sum, item) => sum + (item.hourlyData[h] || 0), 0);
   });
+
+  // 📌 5. คำนวณข้อมูลสำหรับ Pagination
+  const totalPages = Math.ceil(reportData.length / itemsPerPage);
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentItems = reportData.slice(indexOfFirstItem, indexOfLastItem);
 
   const allHoursDropdown = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
 
@@ -286,9 +293,9 @@ function EmployeeMachineReport() {
         </div>
       </div>
 
-      {/* TABLE */}
-      <div className="card border-2 rounded-4 shadow-sm bg-white">
-        <div className="table-responsive" style={{ maxHeight: '68vh' }}>
+      {/* TABLE & PAGINATION */}
+      <div className="card border-2 rounded-4 shadow-sm bg-white mb-4">
+        <div className="table-responsive">
           <table className="table table-bordered table-striped table-hover mb-0 align-middle text-center" style={{ fontSize: '0.85rem' }}>
             <thead className="table-dark sticky-top">
               <tr>
@@ -298,7 +305,7 @@ function EmployeeMachineReport() {
                 <th style={{ width: '80px' }}>รวม</th>
                 {hoursList.map(h => (
                   <th key={h} style={{ minWidth: '55px', padding: '8px 4px' }}>
-                    {parseInt(h, 10)}.00
+                    {parseInt(h, 10)}:00
                   </th>
                 ))}
               </tr>
@@ -311,14 +318,14 @@ function EmployeeMachineReport() {
                     <div className="mt-2 text-muted fw-bold" style={{ fontSize: '0.85rem' }}>กำลังประมวลผลข้อมูล...</div>
                   </td>
                 </tr>
-              ) : reportData.length === 0 ? (
+              ) : currentItems.length === 0 ? (
                 <tr>
                   <td colSpan={4 + hoursList.length} className="py-5 text-muted fw-bold">
                     📭 ไม่พบข้อมูลการผลิตตามเงื่อนไขที่เลือก
                   </td>
                 </tr>
               ) : (
-                reportData.map((item) => {
+                currentItems.map((item) => {
                   const isSelected = selectedRow === item.id;
                   
                   return (
@@ -367,9 +374,9 @@ function EmployeeMachineReport() {
               )}
             </tbody>
             
-            {/* 📌 แถวสรุปยอดรวม (แสดงเมื่อมีข้อมูล) */}
+            {/* 📌 แถวสรุปยอดรวม */}
             {reportData.length > 0 && !loading && (
-              <tfoot className="table-secondary" style={{ position: 'sticky', bottom: 0, zIndex: 2 }}>
+              <tfoot className="table-secondary">
                 <tr>
                   <td colSpan="3" className="text-end pe-4 fw-bold">รวมทั้งหมด</td>
                   <td className="fw-bold text-success fs-6">
@@ -390,9 +397,31 @@ function EmployeeMachineReport() {
                 </tr>
               </tfoot>
             )}
-
           </table>
         </div>
+        
+        {/* 📌 ควบคุมการเปลี่ยนหน้า (Pagination Controls) */}
+        {totalPages > 1 && (
+          <div className="d-flex justify-content-between align-items-center p-3 bg-light border-top rounded-bottom-4">
+            <button 
+              className="btn btn-outline-secondary btn-sm fw-bold px-3"
+              onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+              disabled={currentPage === 1}
+            >
+              <i className="bi bi-chevron-left"></i> ก่อนหน้า
+            </button>
+            <span className="text-muted small fw-bold">
+              หน้า {currentPage} จาก {totalPages} (รวม {reportData.length} รายการ)
+            </span>
+            <button 
+              className="btn btn-outline-secondary btn-sm fw-bold px-3"
+              onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+              disabled={currentPage === totalPages}
+            >
+              ถัดไป <i className="bi bi-chevron-right"></i>
+            </button>
+          </div>
+        )}
       </div>
 
     </div>
