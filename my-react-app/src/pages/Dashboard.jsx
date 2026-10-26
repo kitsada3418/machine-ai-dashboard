@@ -66,6 +66,8 @@ function Dashboard() {
 
     const mhStop = machineList.filter((item) => item.status === 'stop').length;
 
+    const mhAlarm = machineList.filter((item) => Number(item.alarm) > 0).length;
+
     const filteredMachines = machineList.filter((item) => {
         const machineId = (item.Mh_ID || '').toLowerCase();
         const matchesSearch = machineId.includes(searchTerm.toLowerCase());
@@ -182,17 +184,17 @@ function Dashboard() {
                         <div className="d-flex justify-content-between align-items-start position-relative z-1">
                             <div>
                                 <h6 className="text-muted fw-bold text-uppercase small mb-1">
-                                    Avg Cycle Time
+                                    Alarm Machines
                                 </h6>
                                 <h2
-                                    className="fw-bold text-secondary my-1"
+                                    className="fw-bold text-danger my-1"
                                     style={{ fontSize: '2.5rem' }}
                                 >
-                                    42.8 <span className="fs-4 text-muted">s</span>
+                                    {mhAlarm} <span className="fs-4 text-muted"></span>
                                 </h2>
-                                <span className="text-muted small">Overall Plant Avg Speed</span>
+                                <span className="text-muted small">Machines Stop 5 Min</span>
                             </div>
-                            <div className="bg-secondary bg-opacity-10 text-secondary p-3 rounded-circle">
+                            <div className="bg-danger bg-opacity-10 text-danger p-3 rounded-circle">
                                 <i className="bi bi-stopwatch-fill fs-3"></i>
                             </div>
                         </div>

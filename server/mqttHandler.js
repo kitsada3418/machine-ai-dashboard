@@ -11,7 +11,7 @@ let dailyProductionState = {};      // 📌 3. ตัวแปรสำหรั
 
 const FIVE_MINUTES = 5;             // กำหนดเวลา Downtime (หน่วย: นาที) ที่ใช้ตรวจสอบว่ามีการหยุดทำงานเกิน 5 นาทีหรือไม่
 // กำหนดเวลา Snapshot (หน่วย: นาที)
-const SNAPSHOT_INTERVAL_MINUTES = 10;
+const SNAPSHOT_INTERVAL_MINUTES = 15;
 // ถ้าเครื่องไม่ส่งข้อมูลเกินเวลานี้ (ms) ถือว่า OFFLINE — ปรับได้ผ่าน .env
 const OFFLINE_THRESHOLD_MS = parseInt(process.env.OFFLINE_THRESHOLD_MS);
 
@@ -131,7 +131,7 @@ function startSumSnapshotTimer() {
     }
 
     async function updateSumSnapshot() {
-        console.log(`⏱️ [Snapshot] บันทึกยอดรวมล่าสุดของเครื่องจักรทุกเครื่อง (ทุก ${SNAPSHOT_INTERVAL_MINUTES} นาที)`);
+        //console.log(`⏱️ [Snapshot] บันทึกยอดรวมล่าสุดของเครื่องจักรทุกเครื่อง (ทุก ${SNAPSHOT_INTERVAL_MINUTES} นาที)`);
         const entries = Object.entries(liveDataCache);
         const chunkSize = 10; // 📌 หั่นทำทีละ 10 เครื่อง
 
@@ -160,7 +160,7 @@ function startSumSnapshotTimer() {
             // 📌 จุดสำคัญ: คืนพื้นที่ให้ Event Loop หายใจสักนิด ก่อนทำ 10 เครื่องรอบถัดไป
             await new Promise(resolve => setTimeout(resolve, 50)); 
         }
-        console.log(`✅ [Snapshot] บันทึกยอดรวมล่าสุดของเครื่องจักรครบทุกเครื่องแล้ว`);
+        console.log(`✅ [Snapshot (${SNAPSHOT_INTERVAL_MINUTES} minutes)] saved snapshot at {now: ${new Date().toLocaleTimeString()}}`);
     }
 
     scheduleNext();
@@ -211,7 +211,7 @@ function setupMQTT() {
                             updateProductionSum(machineId, oldData).catch(err => {  // บันทึกยอดสุดท้ายของจ๊อบเก่า
                                 console.error('[saveLog Error]', err.message);
                             });
-                            console.log(`✅ บันทึกยอดสุดท้ายของจ๊อบเก่า ${oldData.job_id} ของเครื่อง ${machineId} เรียบร้อยแล้ว`);
+                            //console.log(`✅ บันทึกยอดสุดท้ายของจ๊อบเก่า ${oldData.job_id} ของเครื่อง ${machineId} เรียบร้อยแล้ว`);
                         }
                     }
                 }
@@ -464,7 +464,7 @@ function processMqttRealtime(mhId, jobId, incomingOk) {
 cron.schedule('0 0 * * *', async () => {
     // 📌 หน่วงเวลา 5 วินาที ให้ชัวร์ว่าคิวของ 23:59 ทำงานเคลียร์ลง DB เสร็จสนิทแล้ว
     setTimeout(async () => {
-        console.log('[Cron Job] Midnight Reset: Clearing daily production cache...');
+       // console.log('[Cron Job] Midnight Reset: Clearing daily production cache... (now: ' + new Date().toLocaleString() + ')');
 
         // 1. ล้างตัวแปร State
         dailyProductionState = {};
@@ -480,7 +480,7 @@ cron.schedule('0 0 * * *', async () => {
         // 3. ดึงข้อมูลตั้งต้นใหม่
         await initDailyState();
 
-        console.log('[Cron Job] Midnight Reset: Successfully cleared!');
+        console.log('[Cron Job] Midnight Reset: Successfully cleared! (now: ' + new Date().toLocaleString() + ')');
     }, 5000); // ดีเลย์ 5000 ms (5 วินาที)
 
 }, {
@@ -491,7 +491,7 @@ cron.schedule('0 0 * * *', async () => {
 // 📌 บังคับอัปเดตยอดทุกๆ "นาทีที่ 59" ของทุกชั่วโมง (เช่น 08:59, 09:59, 10:59)
 cron.schedule('59 * * * *', async () => {
 //cron.schedule('*/30 * * * * *', async () => {
-    console.log('⏰ [Cron Job] Hourly Flush: บังคับอัปเดตยอดก่อนตัดชั่วโมง...');
+    //console.log('⏰ [Cron Job] Hourly Flush: บังคับอัปเดตยอดก่อนตัดชั่วโมง...');
 
     const entries = Object.entries(liveDataCache);
     const chunkSize = 10; // 📌 หั่นทำทีละ 10 เครื่องเพื่อไม่ให้โหลดหนักเกินไป
@@ -522,7 +522,7 @@ cron.schedule('59 * * * *', async () => {
     }
     
     
-    console.log('✅ [Cron Job] Hourly Flush: อัปเดตยอดครบทุกเครื่องเสร็จสิ้น');
+    console.log('✅ [Cron Job] Hourly Flush Save Successfully (now: ' + new Date().toLocaleString() + ')');
 
 }, {
     scheduled: true,
