@@ -9,12 +9,11 @@ function UserManagement() {
     { id: 'alarms', label: 'Alarm Log' },
     { id: 'report', label: 'Reports' },
     { id: 'maintenance', label: 'Maintenance Log' },
-    { id: 'oee_dashboard', label: 'OEE Dashboard' },
+    /*{ id: 'oee_dashboard', label: 'OEE Dashboard' },*/
     { id: 'layout', label: 'Factory Layout' },
     { id: 'free_layout', label: 'Free Layout Builder' },
-    { id: 'supervisor', label: 'Supervisor View' },
+    /*{ id: 'supervisor', label: 'Supervisor View' },*/
     { id: 'manager', label: 'File & Settings Manager' },
-    { id: 'oee', label: 'OEE Dashboard' },
     { id: 'user_management', label: 'User Management' },
     { id: 'system_logs', label: 'System Logs' },
     { id: 'employee_management', label: 'Employee Management' } // 📌 เพิ่ม 2 บรรทัดนี้เข้าไปให้ตรงกับ App.js

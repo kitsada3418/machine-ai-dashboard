@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { apiFetch } from '../api';
 
-// 📌 1. รับ Props setCurrentPage และ setSelectedMachine เข้ามา
 function Dashboard({ setCurrentPage, setSelectedMachine }) {
     const [viewMode, setViewMode] = useState('table'); // 'grid' หรือ 'table'
     const [dashboardData, setDashboardData] = useState(null);
@@ -9,7 +8,6 @@ function Dashboard({ setCurrentPage, setSelectedMachine }) {
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('ALL');
 
-    // 📌 2. เพิ่ม State สำหรับจัดการป๊อปอัพ (Modal)
     const [showActionModal, setShowActionModal] = useState(false);
     const [clickedMachine, setClickedMachine] = useState('');
 
@@ -36,7 +34,6 @@ function Dashboard({ setCurrentPage, setSelectedMachine }) {
         };
     }, []);
 
-    // 📌 3. ฟังก์ชันจัดการเมื่อคลิกที่เครื่องจักร
     const handleMachineClick = (mhId) => {
         setClickedMachine(mhId);
         setShowActionModal(true);
@@ -49,7 +46,6 @@ function Dashboard({ setCurrentPage, setSelectedMachine }) {
     const allMachineIds = dashboardData?.mh_list || [];
     const liveData = dashboardData?.data || {};
 
-    // ผสานข้อมูลระหว่างรายชื่อเครื่องทั้งหมดกับข้อมูล Real-time
     const machineList = allMachineIds.map((mhId) => {
         const machineInfo = liveData[mhId];
         if (machineInfo) {
@@ -76,6 +72,7 @@ function Dashboard({ setCurrentPage, setSelectedMachine }) {
     });
 
     const mhStop = machineList.filter((item) => item.status === 'stop').length;
+    const mhAlarm = machineList.filter((item) => Number(item.alarm) > 0).length;
 
     const filteredMachines = machineList.filter((item) => {
         const machineId = (item.Mh_ID || '').toLowerCase();
@@ -89,21 +86,17 @@ function Dashboard({ setCurrentPage, setSelectedMachine }) {
         const aAlarm = Number(a.alarm) || 0;
         const bAlarm = Number(b.alarm) || 0;
 
-        if (aAlarm > 0 && bAlarm > 0) {
-            return bAlarm - aAlarm;
-        }
+        if (aAlarm > 0 && bAlarm > 0) return bAlarm - aAlarm;
         if (aAlarm > 0 && bAlarm === 0) return -1;
         if (aAlarm === 0 && bAlarm > 0) return 1;
 
         const aIsStop = a.status === 'stop';
         const bIsStop = b.status === 'stop';
-
         if (aIsStop && !bIsStop) return -1;
         if (!aIsStop && bIsStop) return 1;
 
         const aIsOffline = a.status === 'offline';
         const bIsOffline = b.status === 'offline';
-
         if (aIsOffline && !bIsOffline) return 1;
         if (!aIsOffline && bIsOffline) return -1;
 
@@ -112,24 +105,17 @@ function Dashboard({ setCurrentPage, setSelectedMachine }) {
 
     return (
         <div
-            className="animate__animated animate__fadeIn container-fluid p-4"
-            style={{ backgroundColor: '#f8f9fa', minHeight: '100vh' }}
+            className="animate__animated animate__fadeIn container-fluid px-2 px-md-4 py-3"
+            style={{ backgroundColor: '#f8f9fa', minHeight: '100vh', overflowX: 'hidden' }}
         >
-            {/* ================= KPI CARDS ================= */}
-            <div className="row g-4 mb-4">
-                <div className="col-xl-3 col-md-6">
-                    <div className="card border-0 rounded-4 p-4 shadow-sm h-100 position-relative overflow-hidden kpi-hover">
+            {/* ================= KPI CARDS (Responsive Grid) ================= */}
+            <div className="row g-3 mb-4">
+                <div className="col-xl-3 col-sm-6 col-12">
+                    <div className="card border-0 rounded-4 p-3 p-md-4 shadow-sm h-100 position-relative overflow-hidden kpi-hover">
                         <div className="d-flex justify-content-between align-items-start position-relative z-1">
                             <div>
-                                <h6 className="text-muted fw-bold text-uppercase small mb-1">
-                                    Total Production
-                                </h6>
-                                <h2
-                                    className="fw-bold text-primary my-1"
-                                    style={{ fontSize: '2.5rem' }}
-                                >
-                                    {totalProduction.toLocaleString()}
-                                </h2>
+                                <h6 className="text-muted fw-bold text-uppercase small mb-1">Total Production</h6>
+                                <h2 className="fw-bold text-primary my-1 kpi-value">{totalProduction.toLocaleString()}</h2>
                                 <span className="text-muted small">Units Produced Today</span>
                             </div>
                             <div className="bg-primary bg-opacity-10 text-primary p-3 rounded-circle">
@@ -139,17 +125,12 @@ function Dashboard({ setCurrentPage, setSelectedMachine }) {
                     </div>
                 </div>
 
-                <div className="col-xl-3 col-md-6">
-                    <div className="card border-0 rounded-4 p-4 shadow-sm h-100 position-relative overflow-hidden kpi-hover">
+                <div className="col-xl-3 col-sm-6 col-12">
+                    <div className="card border-0 rounded-4 p-3 p-md-4 shadow-sm h-100 position-relative overflow-hidden kpi-hover">
                         <div className="d-flex justify-content-between align-items-start position-relative z-1">
                             <div>
-                                <h6 className="text-muted fw-bold text-uppercase small mb-1">
-                                    Active Machines
-                                </h6>
-                                <h2
-                                    className="fw-bold text-success my-1"
-                                    style={{ fontSize: '2.5rem' }}
-                                >
+                                <h6 className="text-muted fw-bold text-uppercase small mb-1">Active Machines</h6>
+                                <h2 className="fw-bold text-success my-1 kpi-value">
                                     {mhOnline} <span className="fs-4 text-muted">/ {mhCount}</span>
                                 </h2>
                                 <span className="text-success small fw-bold">
@@ -163,22 +144,14 @@ function Dashboard({ setCurrentPage, setSelectedMachine }) {
                     </div>
                 </div>
 
-                <div className="col-xl-3 col-md-6">
-                    <div className="card border-0 rounded-4 p-4 shadow-sm h-100 position-relative overflow-hidden kpi-hover">
+                <div className="col-xl-3 col-sm-6 col-12">
+                    <div className="card border-0 rounded-4 p-3 p-md-4 shadow-sm h-100 position-relative overflow-hidden kpi-hover">
                         <div className="d-flex justify-content-between align-items-start position-relative z-1">
                             <div>
-                                <h6 className="text-muted fw-bold text-uppercase small mb-1">
-                                    stopped Machines
-                                </h6>
-                                <h2
-                                    className="fw-bold text-warning my-1"
-                                    style={{ fontSize: '2.5rem' }}
-                                >
-                                    {mhStop}
-                                </h2>
+                                <h6 className="text-muted fw-bold text-uppercase small mb-1">Stopped Machines</h6>
+                                <h2 className="fw-bold text-warning my-1 kpi-value">{mhStop}</h2>
                                 <span className="text-warning small fw-bold">
-                                    <i className="bi bi-exclamation-triangle me-1"></i>Requires
-                                    Attention
+                                    <i className="bi bi-exclamation-triangle me-1"></i>Requires Attention
                                 </span>
                             </div>
                             <div className="bg-danger bg-opacity-10 text-warning p-3 rounded-circle">
@@ -188,22 +161,15 @@ function Dashboard({ setCurrentPage, setSelectedMachine }) {
                     </div>
                 </div>
 
-                <div className="col-xl-3 col-md-6">
-                    <div className="card border-0 rounded-4 p-4 shadow-sm h-100 position-relative overflow-hidden kpi-hover">
+                <div className="col-xl-3 col-sm-6 col-12">
+                    <div className="card border-0 rounded-4 p-3 p-md-4 shadow-sm h-100 position-relative overflow-hidden kpi-hover">
                         <div className="d-flex justify-content-between align-items-start position-relative z-1">
                             <div>
-                                <h6 className="text-muted fw-bold text-uppercase small mb-1">
-                                    Avg Cycle Time
-                                </h6>
-                                <h2
-                                    className="fw-bold text-secondary my-1"
-                                    style={{ fontSize: '2.5rem' }}
-                                >
-                                    42.8 <span className="fs-4 text-muted">s</span>
-                                </h2>
-                                <span className="text-muted small">Overall Plant Avg Speed</span>
+                                <h6 className="text-muted fw-bold text-uppercase small mb-1">Alarm Machines</h6>
+                                <h2 className="fw-bold text-danger my-1 kpi-value">{mhAlarm}</h2>
+                                <span className="text-muted small">Machines stop &gt; 5 min</span>
                             </div>
-                            <div className="bg-secondary bg-opacity-10 text-secondary p-3 rounded-circle">
+                            <div className="bg-danger bg-opacity-10 text-danger p-3 rounded-circle">
                                 <i className="bi bi-stopwatch-fill fs-3"></i>
                             </div>
                         </div>
@@ -211,11 +177,11 @@ function Dashboard({ setCurrentPage, setSelectedMachine }) {
                 </div>
             </div>
 
-            {/* ================= TOOLBAR ================= */}
+            {/* ================= TOOLBAR (Responsive Search & View Toggle) ================= */}
             <div className="card border-0 rounded-4 shadow-sm bg-white mb-4">
-                <div className="card-body p-3 d-flex flex-wrap justify-content-between align-items-center gap-3">
-                    <div className="d-flex flex-wrap gap-3 flex-grow-1">
-                        <div className="input-group" style={{ maxWidth: '350px' }}>
+                <div className="card-body p-3 d-flex flex-column flex-md-row justify-content-between align-items-stretch align-items-md-center gap-3">
+                    <div className="d-flex flex-column flex-sm-row gap-2 flex-grow-1">
+                        <div className="input-group w-100" style={{ maxWidth: '100%', '@media(min-width: 768px)': { maxWidth: '350px' } }}>
                             <span className="input-group-text bg-light border-end-0 text-muted">
                                 <i className="bi bi-search"></i>
                             </span>
@@ -226,7 +192,7 @@ function Dashboard({ setCurrentPage, setSelectedMachine }) {
                                 onChange={(e) => setSearchTerm(e.target.value)}
                             />
                         </div>
-                        <div className="input-group" style={{ maxWidth: '250px' }}>
+                        <div className="input-group w-100" style={{ maxWidth: '100%', '@media(min-width: 768px)': { maxWidth: '220px' } }}>
                             <span className="input-group-text bg-light border-end-0 text-muted">
                                 <i className="bi bi-funnel"></i>
                             </span>
@@ -243,15 +209,15 @@ function Dashboard({ setCurrentPage, setSelectedMachine }) {
                         </div>
                     </div>
 
-                    <div className="bg-light p-1 rounded-pill border">
+                    <div className="bg-light p-1 rounded-pill border d-flex justify-content-center">
                         <button
-                            className={`btn rounded-pill px-4 fw-bold ${viewMode === 'grid' ? 'btn-white shadow-sm text-primary' : 'btn-light text-muted border-0'}`}
+                            className={`btn rounded-pill px-3 px-md-4 fw-bold flex-fill flex-md-grow-0 ${viewMode === 'grid' ? 'btn-white shadow-sm text-primary' : 'btn-light text-muted border-0'}`}
                             onClick={() => setViewMode('grid')}
                         >
                             <i className="bi bi-grid-fill me-2"></i> Grid
                         </button>
                         <button
-                            className={`btn rounded-pill px-4 fw-bold ${viewMode === 'table' ? 'btn-white shadow-sm text-primary' : 'btn-light text-muted border-0'}`}
+                            className={`btn rounded-pill px-3 px-md-4 fw-bold flex-fill flex-md-grow-0 ${viewMode === 'table' ? 'btn-white shadow-sm text-primary' : 'btn-light text-muted border-0'}`}
                             onClick={() => setViewMode('table')}
                         >
                             <i className="bi bi-list-ul me-2"></i> Table
@@ -263,11 +229,7 @@ function Dashboard({ setCurrentPage, setSelectedMachine }) {
             {/* ================= CONTENT AREA ================= */}
             {loading ? (
                 <div className="d-flex flex-column justify-content-center align-items-center py-5">
-                    <div
-                        className="spinner-border text-primary"
-                        style={{ width: '3rem', height: '3rem' }}
-                        role="status"
-                    ></div>
+                    <div className="spinner-border text-primary" style={{ width: '3rem', height: '3rem' }} role="status"></div>
                     <div className="mt-3 text-muted fw-bold fs-5">Loading Live Data...</div>
                 </div>
             ) : filteredMachines.length === 0 ? (
@@ -277,7 +239,7 @@ function Dashboard({ setCurrentPage, setSelectedMachine }) {
                 </div>
             ) : viewMode === 'grid' ? (
                 /* ------------------- GRID VIEW ------------------- */
-                <div className="row g-4">
+                <div className="row g-3">
                     {sortedMachines.map((item, index) => {
                         const isOffline = item.status === 'offline';
                         const isStopped = item.status === 'stop';
@@ -319,23 +281,18 @@ function Dashboard({ setCurrentPage, setSelectedMachine }) {
                         const progress = qtyOrder > 0 ? Math.min((qtyOk / qtyOrder) * 100, 100) : 0;
 
                         return (
-                            <div className="col-xl-3 col-lg-4 col-md-6" key={index}>
-                                {/* 📌 4. ใส่ onClick และ cursor pointer ให้คลิกการ์ดได้ */}
+                            <div className="col-xl-3 col-lg-4 col-sm-6 col-12" key={index}>
                                 <div
                                     className={`card h-100 border-2 rounded-4 shadow-sm card-hover ${borderColor} ${cardClass}`}
                                     onClick={() => handleMachineClick(item.Mh_ID)}
                                     style={{ cursor: 'pointer' }}
                                 >
                                     <div className="card-header bg-transparent border-0 pt-3 pb-0 d-flex justify-content-between align-items-center">
-                                        <h4 className="fw-bold m-0 text-dark d-flex align-items-center">
-                                            <i
-                                                className={`bi bi-hdd-rack-fill text-${statusColor} me-2`}
-                                            ></i>{' '}
+                                        <h5 className="fw-bold m-0 text-dark d-flex align-items-center">
+                                            <i className={`bi bi-hdd-rack-fill text-${statusColor} me-2`}></i>
                                             {item.Mh_ID}
-                                        </h4>
-                                        <span
-                                            className={`badge bg-${statusColor} bg-opacity-10 text-${statusColor} border border-${statusColor} rounded-pill px-2 py-1`}
-                                        >
+                                        </h5>
+                                        <span className={`badge bg-${statusColor} bg-opacity-10 text-${statusColor} border border-${statusColor} rounded-pill px-2 py-1`}>
                                             <i className={`bi ${statusIcon} me-1`}></i>
                                             {statusText}
                                         </span>
@@ -344,29 +301,15 @@ function Dashboard({ setCurrentPage, setSelectedMachine }) {
                                     <div className="card-body pt-3 pb-3">
                                         <div className="d-flex justify-content-between mb-3 bg-light p-2 rounded-3">
                                             <div>
-                                                <div
-                                                    className="text-muted"
-                                                    style={{ fontSize: '0.7rem', fontWeight: 'bold' }}
-                                                >
-                                                    OPERATOR
-                                                </div>
-                                                <div className="fw-bold text-dark">
+                                                <div className="text-muted" style={{ fontSize: '0.7rem', fontWeight: 'bold' }}>OPERATOR</div>
+                                                <div className="fw-bold text-dark text-truncate" style={{ maxWidth: '110px' }}>
                                                     <i className="bi bi-person me-1 text-muted"></i>
                                                     {item.emp_id || '-'}
                                                 </div>
                                             </div>
                                             <div className="text-end">
-                                                <div
-                                                    className="text-muted"
-                                                    style={{ fontSize: '0.7rem', fontWeight: 'bold' }}
-                                                >
-                                                    CUSTOMER
-                                                </div>
-                                                <div
-                                                    className="fw-bold text-primary text-truncate"
-                                                    style={{ maxWidth: '100px' }}
-                                                    title={item.customer}
-                                                >
+                                                <div className="text-muted" style={{ fontSize: '0.7rem', fontWeight: 'bold' }}>CUSTOMER</div>
+                                                <div className="fw-bold text-primary text-truncate" style={{ maxWidth: '110px' }} title={item.customer}>
                                                     {item.customer || '-'}
                                                 </div>
                                             </div>
@@ -374,27 +317,14 @@ function Dashboard({ setCurrentPage, setSelectedMachine }) {
 
                                         <div className="row g-2 mb-3">
                                             <div className="col-7">
-                                                <div
-                                                    className="text-muted"
-                                                    style={{ fontSize: '0.7rem', fontWeight: 'bold' }}
-                                                >
-                                                    JOB ID
-                                                </div>
-                                                <div
-                                                    className="fw-bold text-warning text-truncate"
-                                                    style={{ color: '#f37208' }}
-                                                >
+                                                <div className="text-muted" style={{ fontSize: '0.7rem', fontWeight: 'bold' }}>JOB ID</div>
+                                                <div className="fw-bold text-truncate" style={{ color: '#f37208' }}>
                                                     <i className="bi bi-clipboard-data me-1 text-muted"></i>
                                                     {item.job_id || '-'}
                                                 </div>
                                             </div>
                                             <div className="col-5 text-end">
-                                                <div
-                                                    className="text-muted"
-                                                    style={{ fontSize: '0.7rem', fontWeight: 'bold' }}
-                                                >
-                                                    CYCLE TIME
-                                                </div>
+                                                <div className="text-muted" style={{ fontSize: '0.7rem', fontWeight: 'bold' }}>CYCLE TIME</div>
                                                 <div className="fw-bold text-dark">
                                                     <i className="bi bi-stopwatch me-1 text-muted"></i>
                                                     {item.cycle_time || 0}s
@@ -402,20 +332,11 @@ function Dashboard({ setCurrentPage, setSelectedMachine }) {
                                             </div>
                                         </div>
 
-                                        <div className="mb-3">
+                                        <div className="mb-2">
                                             <div className="d-flex justify-content-between align-items-end mb-1">
-                                                <span
-                                                    className="text-muted fw-bold"
-                                                    style={{ fontSize: '0.75rem' }}
-                                                >
-                                                    JOB PROGRESS
-                                                </span>
-                                                <span
-                                                    className="fw-bold text-success"
-                                                    style={{ fontSize: '0.85rem' }}
-                                                >
-                                                    {qtyOk.toLocaleString()} /{' '}
-                                                    {qtyOrder.toLocaleString()}
+                                                <span className="text-muted fw-bold" style={{ fontSize: '0.75rem' }}>JOB PROGRESS</span>
+                                                <span className="fw-bold text-success" style={{ fontSize: '0.85rem' }}>
+                                                    {qtyOk.toLocaleString()} / {qtyOrder.toLocaleString()}
                                                 </span>
                                             </div>
                                             <div className="progress" style={{ height: '8px' }}>
@@ -425,26 +346,19 @@ function Dashboard({ setCurrentPage, setSelectedMachine }) {
                                                     style={{ width: `${progress}%` }}
                                                 ></div>
                                             </div>
-                                            <div
-                                                className="text-end mt-1 text-muted fw-bold"
-                                                style={{ fontSize: '0.7rem' }}
-                                            >
+                                            <div className="text-end mt-1 text-muted fw-bold" style={{ fontSize: '0.7rem' }}>
                                                 {progress.toFixed(1)}%
                                             </div>
                                         </div>
                                     </div>
 
                                     <div className="card-footer bg-transparent border-top pt-2 pb-3 text-center">
-                                        <div
-                                            className="text-muted fw-bold text-uppercase mb-1"
-                                            style={{ fontSize: '0.75rem' }}
-                                        >
+                                        <div className="text-muted fw-bold text-uppercase mb-1" style={{ fontSize: '0.75rem' }}>
                                             Total Output Today
                                         </div>
-                                        <h3 className="m-0 fw-bold text-dark">
-                                            {Number(item.total_day || 0).toLocaleString()}{' '}
-                                            <span className="fs-6 text-muted">PCS</span>
-                                        </h3>
+                                        <h4 className="m-0 fw-bold text-dark">
+                                            {Number(item.total_day || 0).toLocaleString()} <span className="fs-6 text-muted">PCS</span>
+                                        </h4>
                                     </div>
                                 </div>
                             </div>
@@ -452,15 +366,12 @@ function Dashboard({ setCurrentPage, setSelectedMachine }) {
                     })}
                 </div>
             ) : (
-                /* ------------------- TABLE VIEW ------------------- */
+                /* ------------------- TABLE VIEW (Responsive Table) ------------------- */
                 <div className="card border-0 rounded-4 shadow-sm bg-white overflow-hidden">
                     <div className="table-responsive">
-                        <table className="table table-hover align-middle mb-0">
+                        <table className="table table-hover align-middle mb-0 text-nowrap">
                             <thead className="table-light">
-                                <tr
-                                    className="text-center align-middle text-muted fw-bold"
-                                    style={{ letterSpacing: '0.5px' , fontSize: '16px'}}
-                                >
+                                <tr className="text-center align-middle text-muted fw-bold" style={{ letterSpacing: '0.2px', fontSize: '13px' }}>
                                     <th className="py-3">MACHINE</th>
                                     <th>STATUS</th>
                                     <th>ALARM</th>
@@ -483,7 +394,7 @@ function Dashboard({ setCurrentPage, setSelectedMachine }) {
 
                                     let statusColor = 'secondary';
                                     let statusText = 'OFFLINE';
-                                    let rowClass = ''; 
+                                    let rowClass = '';
                                     let statusAlarmColor = 'secondary';
 
                                     if (isOffline) {
@@ -493,7 +404,7 @@ function Dashboard({ setCurrentPage, setSelectedMachine }) {
                                     } else if (isStopped) {
                                         statusColor = 'warning';
                                         statusText = 'STOP';
-                                        rowClass = 'stop-row'; 
+                                        rowClass = 'stop-row';
                                     } else if (isRunning) {
                                         statusColor = 'success';
                                         statusText = 'RUN';
@@ -502,72 +413,64 @@ function Dashboard({ setCurrentPage, setSelectedMachine }) {
                                     if (alarmOn) {
                                         statusColor = 'danger';
                                         statusAlarmColor = 'danger';
-                                        rowClass = 'alarm-row'; 
+                                        rowClass = 'alarm-row';
                                     }
 
                                     const qtyOrder = Number(item.qty_order) || 0;
                                     const qtyOk = Number(item.ok) || 0;
-                                    const progress =
-                                        qtyOrder > 0 ? Math.min((qtyOk / qtyOrder) * 100, 100) : 0;
+                                    const progress = qtyOrder > 0 ? Math.min((qtyOk / qtyOrder) * 100, 100) : 0;
 
                                     return (
-                                        // 📌 5. ใส่ onClick ให้คลิกแถวใน Table ได้
                                         <tr
                                             key={index}
                                             className={`text-center align-middle ${rowClass}`}
                                             onClick={() => handleMachineClick(item.Mh_ID)}
                                             style={{ cursor: 'pointer' }}
                                         >
-                                            <td className="fw-bold text-dark fs-6">{item.Mh_ID}</td>
+                                            <td className="fw-bold text-dark"
+                                                style={{ fontSize: '14px' }}>
+                                                {item.Mh_ID}
+                                            </td>
                                             <td>
-                                                <span
-                                                    className={`badge bg-${statusColor} bg-opacity-10 text-${statusColor} border border-${statusColor} rounded-pill px-3`}
-                                                >
+                                                <span className={`badge bg-${statusColor} bg-opacity-10 text-${statusColor} border border-${statusColor} rounded-pill px-3`}
+                                                    style={{ fontSize: '12px' }}>
                                                     {statusText}
                                                 </span>
                                             </td>
                                             <td>
-                                                <span
-                                                    className={`badge bg-${statusAlarmColor} bg-opacity-10 text-${statusAlarmColor} border border-${statusAlarmColor} rounded-pill px-3`}
-                                                >
+                                                <span className={`badge bg-${statusAlarmColor} bg-opacity-10 text-${statusAlarmColor} border border-${statusAlarmColor} rounded-pill px-2`}
+                                                    style={{ fontSize: '12px' }}>
                                                     {item.alarm ? `${item.alarm} Min` : '-'}
                                                 </span>
                                             </td>
-                                            <td className="fw-bold text-muted">{item.status === 'stop' ? '-' : item.emp_id || '-'}</td>
-                                            <td className="fw-bold text-primary">
+                                            <td className="fw-bold text-muted" style={{ fontSize: '14px' }}>
+                                                {item.status === 'stop' ? '-' : item.emp_id || '-'}
+                                            </td>
+                                            <td className="fw-bold text-primary" style={{ fontSize: '14px' }}>
                                                 {item.status === 'stop' ? '-' : item.customer || '-'}
                                             </td>
-                                            <td className="fw-bold" style={{ color: '#f37208' }} >
+                                            <td className="fw-bold" style={{ color: '#f37208', fontSize: '14px' }}>
                                                 {item.status === 'stop' ? '-' : item.job_id || '-'}
                                             </td>
-
-                                            <td style={{ minWidth: '150px' }}>
+                                            <td style={{ minWidth: '80px' }}>
                                                 <div className="d-flex justify-content-between small fw-bold mb-1">
-                                                    <span className="text-success">
-                                                        {qtyOk.toLocaleString()}
-                                                    </span>
-                                                    <span className="text-muted">
-                                                        {qtyOrder.toLocaleString()}
-                                                    </span>
+                                                    <span className="text-success" style={{ fontSize: '11px' }}>{qtyOk.toLocaleString()}</span>
+                                                    <span className="text-muted" style={{ fontSize: '11px' }}>{qtyOrder.toLocaleString()}</span>
                                                 </div>
                                                 <div className="progress" style={{ height: '6px' }}>
-                                                    <div
-                                                        className={`progress-bar bg-${statusColor}`}
-                                                        style={{ width: `${progress}%` }}
-                                                    ></div>
+                                                    <div className={`progress-bar bg-${statusColor}`} style={{ width: `${progress}%` }}></div>
                                                 </div>
                                             </td>
-
-                                            <td className="fw-bold fs-5 text-dark">
+                                            <td className="fw-bold text-dark" style={{ fontSize: '14px' }}>
                                                 {Number(item.total_day || 0).toLocaleString()}
                                             </td>
-                                            <td className="text-muted small">
+                                            <td className="text-muted small" style={{ fontSize: '12px' }}>
                                                 {item.status === 'stop' ? '-' : item.t_start || '-'}
                                             </td>
-                                            <td className="text-muted fw-bold">
+                                            <td className="text-muted fw-bold" style={{ fontSize: '12px' }}>
                                                 {item.status === 'stop' ? '-' : item.t_run || '-'}
                                             </td>
-                                            <td className="fw-bold">
+                                            <td className="fw-bold" style={{ fontSize: '12px' }}>
                                                 <i className="bi bi-stopwatch text-muted me-1"></i>
                                                 {item.cycle_time}
                                             </td>
@@ -580,18 +483,18 @@ function Dashboard({ setCurrentPage, setSelectedMachine }) {
                 </div>
             )}
 
-            {/* ================= 📌 6. MODAL ป๊อปอัพตัวเลือก (แสดงเมื่อกดการ์ด/ตาราง) ================= */}
+            {/* ================= MODAL ================= */}
             {showActionModal && (
-                <div className="position-fixed top-0 start-0 w-100 h-100 d-flex justify-content-center align-items-center" style={{ backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1050 }}>
-                    <div className="bg-white p-4 rounded-4 shadow-lg animate__animated animate__zoomIn" style={{ width: '380px' }}>
+                <div className="position-fixed top-0 start-0 w-100 h-100 d-flex justify-content-center align-items-center p-3" style={{ backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1050 }}>
+                    <div className="bg-white p-4 rounded-4 shadow-lg animate__animated animate__zoomIn w-100" style={{ maxWidth: '380px' }}>
                         <div className="d-flex justify-content-between align-items-center mb-3">
                             <h4 className="fw-bold text-primary m-0"><i className="bi bi-cpu me-2"></i>เครื่อง {clickedMachine}</h4>
                             <button className="btn-close" onClick={() => setShowActionModal(false)}></button>
                         </div>
                         <p className="text-muted small mb-4">โปรดเลือกรายการที่คุณต้องการดูข้อมูล</p>
-                        
+
                         <div className="d-flex flex-column gap-3">
-                            <button 
+                            <button
                                 className="btn btn-outline-primary fw-bold py-3 rounded-4 shadow-sm text-start"
                                 onClick={() => {
                                     setSelectedMachine(clickedMachine);
@@ -601,8 +504,8 @@ function Dashboard({ setCurrentPage, setSelectedMachine }) {
                             >
                                 <i className="bi bi-bar-chart-line-fill fs-4 me-3"></i>ดูข้อมูลการทำงานของวันนี้
                             </button>
-                            
-                            <button 
+
+                            <button
                                 className="btn btn-outline-success fw-bold py-3 rounded-4 shadow-sm text-start"
                                 onClick={() => {
                                     setSelectedMachine(clickedMachine);
@@ -620,82 +523,85 @@ function Dashboard({ setCurrentPage, setSelectedMachine }) {
             {/* ================= CUSTOM CSS ================= */}
             <style>{`
                 .kpi-hover {
-                  transition: transform 0.3s ease, box-shadow 0.3s ease;
+                    transition: transform 0.3s ease, box-shadow 0.3s ease;
                 }
                 .kpi-hover:hover {
-                  transform: translateY(-5px);
-                  box-shadow: 0 10px 20px rgba(0,0,0,0.08) !important;
+                    transform: translateY(-5px);
+                    box-shadow: 0 10px 20px rgba(0,0,0,0.08) !important;
                 }
                 .card-hover {
-                  transition: all 0.2s ease-in-out;
+                    transition: all 0.2s ease-in-out;
                 }
                 .card-hover:hover {
-                  transform: translateY(-3px);
-                  box-shadow: 0 8px 15px rgba(0,0,0,0.1) !important;
+                    transform: translateY(-3px);
+                    box-shadow: 0 8px 15px rgba(0,0,0,0.1) !important;
                 }
                 
                 @keyframes blink-red {
-                  0% { opacity: 1; }
-                  50% { opacity: 0.4; }
-                  100% { opacity: 1; }
+                    0% { opacity: 1; }
+                    50% { opacity: 0.4; }
+                    100% { opacity: 1; }
                 }
                 @keyframes blink-yellow {
-                  0% { opacity: 1; }
-                  50% { opacity: 0.4; }
-                  100% { opacity: 1; }
+                    0% { opacity: 1; }
+                    50% { opacity: 0.4; }
+                    100% { opacity: 1; }
                 }
 
-                /* ตั้งค่าตารางให้รองรับการทำมุมโค้งมนและเว้นระยะห่างระหว่างแถว */
                 .table {
-                  border-collapse: separate;
-                  border-spacing: 0 6px;
+                    border-collapse: separate;
+                    border-spacing: 0 6px;
                 }
 
-                /* บังคับสีพื้นหลัง กระพริบ และทำมุมโค้งที่ช่องแรกและช่องสุดท้ายของแถว Alarm */
                 .alarm-row td {
-                  background-color: rgba(220, 53, 69, 0.2) !important;
-                  animation: blink-red 3s infinite;
+                    background-color: rgba(220, 53, 69, 0.2) !important;
+                    animation: blink-red 3s infinite;
                 }
                 .alarm-row td:first-child {
-                  border-top-left-radius: 12px;
-                  border-bottom-left-radius: 12px;
+                    border-top-left-radius: 12px;
+                    border-bottom-left-radius: 12px;
                 }
                 .alarm-row td:last-child {
-                  border-top-right-radius: 12px;
-                  border-bottom-right-radius: 12px;
+                    border-top-right-radius: 12px;
+                    border-bottom-right-radius: 12px;
                 }
 
-                /* บังคับสีพื้นหลัง กระพริบ และทำมุมโค้งที่ช่องแรกและช่องสุดท้ายของแถว Stop */
                 .stop-row td {
-                  background-color: rgba(255, 193, 7, 0.2) !important;
-                  animation: blink-yellow 3s infinite;
+                    background-color: rgba(255, 193, 7, 0.2) !important;
+                    animation: blink-yellow 3s infinite;
                 }
                 .stop-row td:first-child {
-                  border-top-left-radius: 12px;
-                  border-bottom-left-radius: 12px;
+                    border-top-left-radius: 12px;
+                    border-bottom-left-radius: 12px;
                 }
                 .stop-row td:last-child {
-                  border-top-right-radius: 12px;
-                  border-bottom-right-radius: 12px;
+                    border-top-right-radius: 12px;
+                    border-bottom-right-radius: 12px;
                 }
 
                 .offline-row td {
-                  opacity: 0.5;
-                  background-color: #f8f9fa !important;
+                    opacity: 0.5;
+                    background-color: #f8f9fa !important;
                 }
 
-                /* บังคับสีพื้นหลังและกระพริบ "ทั้งการ์ด" ในโหมด Grid */
                 .alarm-card {
-                  background-color: rgba(220, 53, 69, 0.15) !important;
-                  animation: blink-red 5s infinite;
+                    background-color: rgba(220, 53, 69, 0.15) !important;
+                    animation: blink-red 5s infinite;
                 }
                 .stop-card {
-                  background-color: rgba(255, 193, 7, 0.15) !important;
-                  animation: blink-yellow 5s infinite;
+                    background-color: rgba(255, 193, 7, 0.15) !important;
+                    animation: blink-yellow 5s infinite;
                 }
 
                 .btn-white {
-                  background-color: white;
+                    background-color: white;
+                }
+
+                /* Responsive font adjustments for mobile KPI cards */
+                @media (max-width: 768px) {
+                    .kpi-value {
+                        font-size: 2rem !important;
+                    }
                 }
             `}</style>
         </div>

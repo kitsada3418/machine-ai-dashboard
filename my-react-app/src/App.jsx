@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import 'bootstrap-icons/font/bootstrap-icons.css';
 
@@ -23,28 +23,59 @@ import EmployeeManagement from './pages/EmployeeManagement';
 import MachineToday from './pages/MachineToday';
 
 function App() {
-  const [isLoggedIn, setIsLoggedIn] = useState(() => Boolean(localStorage.getItem('token')));
-  const [userRole, setUserRole] = useState(() => localStorage.getItem('role') || 'user');
+  const [isLoggedIn, setIsLoggedIn] = useState(() => {
+    const token = sessionStorage.getItem('token');
+    return !!token && token !== 'null' && token !== 'undefined' && token !== '';
+  });
+  
+  const [userRole, setUserRole] = useState(() => sessionStorage.getItem('role') || 'user');
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [selectedMachine, setSelectedMachine] = useState('');
-  const [userPermissions] = useState(() => {
+  
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+
+  // 1. [แก้ไข] เพิ่ม setUserPermissions เข้ามา
+  const [userPermissions, setUserPermissions] = useState(() => {
     try {
-      const parsed = JSON.parse(localStorage.getItem('permissions') || '[]');
+      const parsed = JSON.parse(sessionStorage.getItem('permissions') || '[]');
       return Array.isArray(parsed) ? parsed : [];
     } catch {
       return [];
     }
   });
 
+  // 2. [เพิ่ม] อัปเดต userPermissions ทันทีที่ล็อกอินสำเร็จ
+  useEffect(() => {
+    if (isLoggedIn) {
+      try {
+        const parsed = JSON.parse(sessionStorage.getItem('permissions') || '[]');
+        setUserPermissions(Array.isArray(parsed) ? parsed : []);
+      } catch {
+        setUserPermissions([]);
+      }
+    }
+  }, [isLoggedIn]); // ทำงานเมื่อสถานะ isLoggedIn เปลี่ยนแปลง
+
+  // ==========================================
+  // useEffect สำหรับเคลียร์ค่า selectedMachine
+  // ==========================================
+  useEffect(() => {
+    const pagesRequiringMachine = ['layout', 'log_detail', 'machine_today']; 
+    
+    if (!pagesRequiringMachine.includes(currentPage)) {
+      setSelectedMachine('');
+    }
+  }, [currentPage]); 
+  // ==========================================
+
+
   // ฟังก์ชันตรวจสอบว่า User มีสิทธิ์เข้าหน้านี้ไหม
   const checkPermission = (pageId) => {
-    if (userRole === 'admin') return true; // Admin เข้าได้ทุกหน้า
+    if (userRole === 'admin') return true; 
     return userPermissions.includes(pageId);
   };
 
-  // ฟังก์ชันตัวแทนแสดงหน้าจอ หรือหน้าแจ้งเตือนไม่มีสิทธิ์
   const renderPageContent = () => {
-    // กำหนด mapping ระหว่าง currentPage กับ pageId ที่ใช้เช็คสิทธิ์
     const pageMapping = {
       dashboard: 'dashboard',
       graphs: 'graphs',
@@ -56,17 +87,16 @@ function App() {
       free_layout: 'free_layout',
       oee_dashboard: 'oee_dashboard',
       user_management: 'user_management', 
-      system_logs: 'system_logs',         
+      system_logs: 'system_logs',        
       maintenance: 'maintenance',
       report: 'report',
       employee_management: 'employee_management',
-      machine_today: 'dashboard', // ให้สิทธิ์ผูกกับ dashboard หรือสร้างสิทธิ์เพิ่มตามต้องการ
+      machine_today: 'dashboard', 
       supervisor: 'supervisor'
     };
 
     const requiredPermission = pageMapping[currentPage] || currentPage;
 
-    // ตรวจสอบสิทธิ์ (ถ้าไม่มีสิทธิ์และไม่ใช่หน้า Dashboard หลัก)
     if (currentPage !== 'dashboard' && !checkPermission(requiredPermission)) {
       return (
         <div className="text-center py-5">
@@ -80,7 +110,6 @@ function App() {
       );
     }
 
-    // แสดงหน้าจอปกติ (พร้อมส่ง Props ครบถ้วน)
     switch (currentPage) {
       case 'dashboard': 
         return <Dashboard setCurrentPage={setCurrentPage} setSelectedMachine={setSelectedMachine} />;
@@ -115,33 +144,39 @@ function App() {
       case 'supervisor': 
         return <Supervisor />;
       default: 
-        return <Dashboard setCurrentPage={setCurrentPage} setSelectedMachine={setSelectedMachine} />;
+        return <Login setIsLoggedIn={setIsLoggedIn} setUserRole={setUserRole} />;
     }
   };
 
-  // หน้า LOGIN
   if (!isLoggedIn) {
     return <Login setIsLoggedIn={setIsLoggedIn} setUserRole={setUserRole} />;
   }
 
-  // หน้าหลัก
   return (
     <div className="d-flex" style={{ minHeight: '100vh', backgroundColor: '#f8f9fa' }}>
       
-      {/* ================= SIDEBAR (ซ้าย) ================= */}
       <Navbar 
         currentPage={currentPage} 
         setCurrentPage={setCurrentPage} 
         userRole={userRole} 
         userPermissions={userPermissions} 
         onLogout={() => {
-          localStorage.clear();
+          sessionStorage.clear(); 
           setIsLoggedIn(false);
-        }} 
+          setUserRole('user'); // 3. [เพิ่ม] เคลียร์ Role ทิ้ง
+          setUserPermissions([]); // 4. [เพิ่ม] เคลียร์ Permissions ทิ้ง เพื่อป้องกันข้อมูลค้าง
+        }}
+        isCollapsed={isSidebarCollapsed}
+        setIsCollapsed={setIsSidebarCollapsed}
       />
 
-      {/* ================= CONTENT AREA (ขวา) ================= */}
-      <div className="w-100" style={{ marginLeft: '260px', transition: 'all 0.3s ease' }}>
+      <div 
+        className="w-100" 
+        style={{ 
+          marginLeft: isSidebarCollapsed ? '70px' : '220px', 
+          transition: 'margin-left 0.3s ease' 
+        }}
+      >
         <div className="container-fluid px-4 py-4">
           {renderPageContent()}
         </div>

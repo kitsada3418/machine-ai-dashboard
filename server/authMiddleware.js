@@ -10,12 +10,14 @@ const authenticateToken = (req, res, next) => {
     const token = authHeader && authHeader.split(' ')[1];
 
     if (!token) {
-        return res.status(401).json({ message: 'Access Denied: ไม่พบ Token ยืนยันตัวตน' });
+        //return res.status(401).json({ message: 'Access Denied: ไม่พบ Token ยืนยันตัวตน' });
+        return req.socket.destroy();
     }
 
     jwt.verify(token, SECRET_KEY, (err, user) => {
         if (err) {
-            return res.status(403).json({ message: 'Access Denied: Token ไม่ถูกต้องหรือหมดอายุ' });
+            //return res.status(403).json({ message: 'Access Denied: Token ไม่ถูกต้องหรือหมดอายุ' });
+            return req.socket.destroy();
         }
         req.user = user;
         next();
@@ -24,7 +26,8 @@ const authenticateToken = (req, res, next) => {
 
 const requireRole = (...roles) => (req, res, next) => {
     if (!req.user || !roles.includes(req.user.role)) {
-        return res.status(403).json({ message: 'Access Denied: ไม่มีสิทธิ์ดำเนินการ' });
+        //return res.status(403).json({ message: 'Access Denied: ไม่มีสิทธิ์ดำเนินการ' });
+        return req.socket.destroy();
     }
     next();
 };

@@ -9,20 +9,37 @@ const getCurrentMonth = () => {
 };
 
 function LogDetail({ setCurrentPage, machineId }) {
-  // 1. แยกประเภทว่าเป็นพนักงานหรือเครื่องจักร จากข้อความที่ส่งมา
-  const isEmployee = machineId?.startsWith('พนักงาน:');
-  const targetId = isEmployee ? machineId.replace('พนักงาน: ', '') : machineId;
+  // 1. ตรวจสอบว่าเป็นพนักงานหรือเครื่องจักร
+  const isEmployee = typeof machineId === 'string' && machineId.includes('พนักงาน');
+  let rawTargetId = isEmployee 
+    ? machineId.replace(/พนักงาน:\s*/, '').trim() 
+    : machineId?.trim();
+  
+  // 🔴 เช็คว่าเป็นการโดดมาจากหน้าค้นหารวมหรือไม่
+  const isGlobalSearch = rawTargetId === 'ALL_MACHINES' || rawTargetId === 'ALL_EMPLOYEES';
+  const targetId = isGlobalSearch ? '' : rawTargetId; 
 
   // ================= STATE =================
   const [allLogs, setAllLogs] = useState([]);
   const [loading, setLoading] = useState(false);
   
-  // State สำหรับ Filters
-  const [filterDate, setFilterDate] = useState(getCurrentMonth());
-  const [filterJob, setFilterJob] = useState('');
+  // 🔴 ดึงค่าจาก sessionStorage มาเป็นค่าตั้งต้น (ถ้ามี)
+  const [filterDate, setFilterDate] = useState(() => {
+    const savedDate = sessionStorage.getItem('searchDate');
+    return savedDate !== null ? savedDate : getCurrentMonth();
+  });
+  const [filterJob, setFilterJob] = useState(() => {
+    return sessionStorage.getItem('searchJobId') || '';
+  });
   
   const [pageNum, setPageNum] = useState(1);
   const itemsPerPage = 20;
+
+  // 🔴 เคลียร์ sessionStorage ทิ้งเมื่อหน้าโหลดเสร็จ
+  useEffect(() => {
+    sessionStorage.removeItem('searchJobId');
+    sessionStorage.removeItem('searchDate');
+  }, []);
 
   // ================= FETCH DATA =================
   const fetchLogs = async () => {
@@ -30,10 +47,10 @@ function LogDetail({ setCurrentPage, machineId }) {
     try {
       const queryParams = new URLSearchParams();
       
-      if (isEmployee) {
-        queryParams.append('empId', targetId);
-      } else {
-        queryParams.append('mhId', targetId);
+      // จะแนบ id ไปหา Database ก็ต่อเมื่อไม่ใช่การค้นหารวม
+      if (targetId) {
+        if (isEmployee) queryParams.append('empId', targetId);
+        else queryParams.append('mhId', targetId);
       }
 
       if (filterDate) queryParams.append('date', filterDate);
@@ -44,7 +61,7 @@ function LogDetail({ setCurrentPage, machineId }) {
       
       const result = await response.json();
       setAllLogs(result || []);
-      setPageNum(1); // รีเซ็ตหน้ากลับเป็นหน้า 1
+      setPageNum(1);
     } catch (error) {
       console.error('Error fetching logs:', error);
       setAllLogs([]);
@@ -59,11 +76,12 @@ function LogDetail({ setCurrentPage, machineId }) {
       setLoading(true);
       try {
         const queryParams = new URLSearchParams();
-        if (isEmployee) {
-          queryParams.append('empId', targetId);
-        } else {
-          queryParams.append('mhId', targetId);
+        
+        if (targetId) {
+          if (isEmployee) queryParams.append('empId', targetId);
+          else queryParams.append('mhId', targetId);
         }
+
         if (filterDate) queryParams.append('date', filterDate);
         if (filterJob.trim() !== '') queryParams.append('jobId', filterJob.trim());
 
@@ -92,13 +110,47 @@ function LogDetail({ setCurrentPage, machineId }) {
   const currentLogs = allLogs.slice(indexOfFirstItem, indexOfLastItem);
   const totalPages = Math.ceil(allLogs.length / itemsPerPage) || 1;
 
+  // ================= สร้างฟังก์ชันคำนวณข้อความ Header ใหม่ =================
+  const getHeaderText = () => {
+    const modeTitle = isEmployee ? '👨‍🔧 Employee Logs:' : '🤖 Machine Logs:';
+
+    // 🔴 ดักทางแก้ปัญหา: ถ้าเป็นการค้นหารวม หรือ ชื่อเครื่องจักรถูกล้างจนเป็นค่าว่าง
+    if (isGlobalSearch || !targetId) {
+      if (filterJob && filterDate) {
+        return { title: modeTitle, highlight: `ค้นหารวม (Job: ${filterJob} | วันที่: ${filterDate})` };
+      } else if (filterJob) {
+        return { title: modeTitle, highlight: `ค้นหา Job ID: ${filterJob}` };
+      } else if (filterDate) {
+        return { title: modeTitle, highlight: `ค้นหาจากวันที่: ${filterDate}` };
+      } else {
+        return { title: modeTitle, highlight: 'ผลการค้นหารวมทั้งหมด' };
+      }
+    } 
+    // กรณีคลิกเข้ามาจากการ์ดปกติ
+    else {
+      let text = targetId;
+      if (filterJob && filterDate) text += ` [ ค้นหา Job: ${filterJob} | วันที่: ${filterDate} ]`;
+      else if (filterJob) text += ` [ ค้นหา Job: ${filterJob} ]`;
+      else if (filterDate) text += ` [ ค้นหา: ${filterDate} ]`;
+      
+      return { title: modeTitle, highlight: text };
+    }
+  };
+
+  const headerInfo = getHeaderText();
+
   return (
     <div className="animate__animated animate__fadeIn container-fluid p-4">
       
       {/* ================= HEADER & BACK BUTTON ================= */}
       <div className="d-flex justify-content-between align-items-center mb-4">
         <h4 className="m-0 ps-3 border-start border-4 border-primary d-flex align-items-center">
-          {isEmployee ? '👨‍🔧 Employee Logs:' : '🤖 Machine Logs:'} <span className="ms-2 text-primary">{targetId}</span>
+          {headerInfo.title}
+          {headerInfo.highlight && (
+            <span className="ms-2 text-primary">
+              {headerInfo.highlight}
+            </span>
+          )}
         </h4>
         <button 
           className="btn btn-outline-secondary fw-bold rounded-pill px-4"
@@ -185,7 +237,6 @@ function LogDetail({ setCurrentPage, machineId }) {
                         {log.Cust_Name || '-'}
                       </td>
                       
-                      {/* เพิ่มคอลัมน์ Terminal, Confirm Start และ Confirm End */}
                       <td><span className="badge bg-light text-dark border">{log.T_Name || '-'}</span></td>
                       <td className="text-secondary">{log.ConfirmStart_ID || '-'}</td>
                       <td className="text-secondary">{log.ConfirmEnd_ID || '-'}</td>

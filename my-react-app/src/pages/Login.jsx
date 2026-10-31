@@ -29,15 +29,16 @@ function Login({ setIsLoggedIn, setUserRole }) {
       const data = await response.json();
 
       if (response.ok) {
-        localStorage.setItem('token', data.token);
-        localStorage.setItem('role', data.role);
+        // 📌 เปลี่ยนมาใช้ sessionStorage เพื่อให้ลืม Token ทันทีเมื่อปิดเบราว์เซอร์
+        sessionStorage.setItem('token', data.token);
+        sessionStorage.setItem('role', data.role);
         
-        // 🔑 บันทึกสิทธิ์ (permissions) ที่ได้จาก Backend ลงใน localStorage
+        // 🔑 บันทึกสิทธิ์ (permissions) ที่ได้จาก Backend ลงใน sessionStorage
         const permissionsToSave = typeof data.permissions === 'string'
           ? safeParse(data.permissions, [])
           : (Array.isArray(data.permissions) ? data.permissions : []);
           
-        localStorage.setItem('permissions', JSON.stringify(permissionsToSave));
+        sessionStorage.setItem('permissions', JSON.stringify(permissionsToSave));
         
         setIsLoggedIn(true);
         setUserRole(data.role);

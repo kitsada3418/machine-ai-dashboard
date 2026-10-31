@@ -7,6 +7,10 @@ function EmployeeManagement() {
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
+  // ================= Pagination State =================
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage] = useState(10); // กำหนดจำนวนรายการต่อหน้า (เปลี่ยนได้)
+
   // State สำหรับ Modal
   const [showModal, setShowModal] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
@@ -38,6 +42,11 @@ function EmployeeManagement() {
   useEffect(() => {
     fetchData();
   }, []);
+
+  // เมื่อมีการพิมพ์ค้นหา ให้กลับไปหน้า 1 เสมอ
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm]);
 
   // เปิด Modal สำหรับเพิ่มใหม่
   const handleAddNew = () => {
@@ -122,6 +131,15 @@ function EmployeeManagement() {
     emp.Emp_Name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (emp.Pos_Name && emp.Pos_Name.toLowerCase().includes(searchTerm.toLowerCase()))
   );
+
+  // ================= Logic สำหรับ Pagination =================
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  // ตัด array ให้เหลือเฉพาะของหน้าปัจจุบัน
+  const currentEmployees = filteredEmployees.slice(indexOfFirstItem, indexOfLastItem);
+  const totalPages = Math.ceil(filteredEmployees.length / itemsPerPage);
+
+  const paginate = (pageNumber) => setCurrentPage(pageNumber);
 
   return (
     <div className="container-fluid p-3 animate__animated animate__fadeIn position-relative">
@@ -232,10 +250,11 @@ function EmployeeManagement() {
       </div>
 
       {/* DATA TABLE */}
-      <div className="card border-2 rounded-4 shadow-sm bg-white">
-        <div className="table-responsive" style={{ maxHeight: '65vh' }}>
+      <div className="card border-2 rounded-4 shadow-sm bg-white p-3">
+        {/* เอาแถบเลื่อนออก (เอา maxHeight ออก) */}
+        <div className="table-responsive">
           <table className="table table-hover align-middle mb-0 text-center" style={{ fontSize: '0.9rem' }}>
-            <thead className="table-dark sticky-top">
+            <thead className="table-dark">
               <tr>
                 <th style={{ width: '60px' }}>ลำดับ</th>
                 <th style={{ width: '120px' }}>รหัสพนักงาน</th>
@@ -253,16 +272,17 @@ function EmployeeManagement() {
                     <div className="mt-2 text-muted fw-bold">กำลังโหลดข้อมูล...</div>
                   </td>
                 </tr>
-              ) : filteredEmployees.length === 0 ? (
+              ) : currentEmployees.length === 0 ? (
                 <tr>
                   <td colSpan="6" className="py-5 text-muted fw-bold">
                     📭 ไม่พบข้อมูลพนักงาน
                   </td>
                 </tr>
               ) : (
-                filteredEmployees.map((emp, index) => (
+                currentEmployees.map((emp, index) => (
                   <tr key={emp.Emp_ID}>
-                    <td className="text-muted fw-bold">{index + 1}</td>
+                    {/* คำนวณลำดับให้ถูกต้องตามหน้าที่แสดงอยู่ */}
+                    <td className="text-muted fw-bold">{indexOfFirstItem + index + 1}</td>
                     <td className="fw-bold text-primary">{emp.Emp_ID}</td>
                     <td className="text-start fw-bold">{emp.Emp_Name}</td>
                     <td className="text-start">
@@ -299,6 +319,38 @@ function EmployeeManagement() {
             </tbody>
           </table>
         </div>
+
+        {/* ================= ปุ่มควบคุมหน้า (Pagination UI) ================= */}
+        {totalPages > 0 && (
+          <div className="d-flex flex-column flex-md-row justify-content-between align-items-center mt-4">
+            <span className="text-muted small fw-bold mb-2 mb-md-0">
+              แสดง {indexOfFirstItem + 1} ถึง {Math.min(indexOfLastItem, filteredEmployees.length)} จากทั้งหมด {filteredEmployees.length} รายการ
+            </span>
+            <nav>
+              <ul className="pagination pagination-sm mb-0 shadow-sm">
+                <li className={`page-item ${currentPage === 1 ? 'disabled' : ''}`}>
+                  <button className="page-link text-primary fw-bold" onClick={() => paginate(currentPage - 1)}>
+                    ก่อนหน้า
+                  </button>
+                </li>
+                
+                {Array.from({ length: totalPages }, (_, i) => (
+                  <li key={i + 1} className={`page-item ${currentPage === i + 1 ? 'active' : ''}`}>
+                    <button className="page-link fw-bold" onClick={() => paginate(i + 1)}>
+                      {i + 1}
+                    </button>
+                  </li>
+                ))}
+
+                <li className={`page-item ${currentPage === totalPages ? 'disabled' : ''}`}>
+                  <button className="page-link text-primary fw-bold" onClick={() => paginate(currentPage + 1)}>
+                    ถัดไป
+                  </button>
+                </li>
+              </ul>
+            </nav>
+          </div>
+        )}
       </div>
 
     </div>

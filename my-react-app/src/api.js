@@ -13,22 +13,39 @@ const currentHost = window.location.hostname;
 export const API_BASE = urlList.find(url => url.includes(currentHost)) || urlList[0];
 
 export const getAuthHeaders = () => {
-  const token = localStorage.getItem('token');
+  // 📌 เปลี่ยนจาก localStorage เป็น sessionStorage
+  const token = sessionStorage.getItem('token');
   return {
     'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {})
   };
 };
 
-export const apiFetch = (path, options = {}) => {
+export const apiFetch = async (path, options = {}) => {
   const { headers, ...rest } = options;
-  return fetch(`${API_BASE}${path}`, {
-    ...rest,
-    headers: {
-      ...getAuthHeaders(),
-      ...(headers || {})
+  
+  try {
+    const response = await fetch(`${API_BASE}${path}`, {
+      ...rest,
+      headers: {
+        ...getAuthHeaders(),
+        ...(headers || {})
+      }
+    });
+
+    // 📌 ดักจับกรณี Token มีปัญหาหรือหมดอายุจากฝั่ง Backend (401 Unauthorized หรือ 403 Forbidden)
+    if (response.status === 401 || response.status === 403) {
+      alert("เซสชันของคุณไม่ถูกต้องหรือหมดอายุ กรุณาเข้าสู่ระบบใหม่");
+      sessionStorage.clear(); // ล้าง Token ทิ้ง
+      window.location.href = '/'; // บังคับรีเฟรชกลับไปหน้า Login
+      return response;
     }
-  });
+
+    return response;
+  } catch (error) {
+    console.error("API Fetch Error:", error);
+    throw error;
+  }
 };
 
 export const safeParse = (value, fallback = []) => {

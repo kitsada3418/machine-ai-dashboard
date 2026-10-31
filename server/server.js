@@ -16,6 +16,7 @@ const { authenticateToken } = require("./authMiddleware");
 const userRoutes = require("./userRoutes"); // (สมมติว่าเซฟชื่อไฟล์ว่า userRoutes.js)
 
 const pool = require("./db");
+const e = require("express");
 const app = express();
 
 app.set("pool", pool);
@@ -73,6 +74,8 @@ async function getMasterDataSummary(mhId_All, empId_All, mh_count, emp_count) {
 }
 
 let cachedMachineList = {};
+
+
 
 
 app.get("/api/data_live", async (req, res) => {
@@ -137,7 +140,10 @@ app.get("/api/production/selectData", async (req, res) => {
 
     // 2. ดักดึงชื่อพนักงาน
     if (emp_detail === "true") {
-      const [rows] = await pool.query(`SELECT Emp_ID, Emp_Name FROM Emp ORDER BY Emp_ID ASC`);
+      const [rows] = await pool.query(`SELECT Emp_ID, Emp_Name 
+                                          FROM Emp 
+                                          WHERE is_active = 1 
+                                          ORDER BY Emp_ID ASC`);
       return res.json(rows);
     }
     let query = "";
@@ -153,6 +159,7 @@ app.get("/api/production/selectData", async (req, res) => {
       if (query) query += ` UNION `;
       query += `  SELECT Emp_ID
                         from Emp
+                        WHERE is_active = 1
                         ORDER BY Emp_ID ASC
                     `;
     }
@@ -160,12 +167,14 @@ app.get("/api/production/selectData", async (req, res) => {
       if (query) query += ` UNION `;
       query += `  SELECT COUNT(DISTINCT Mh_ID) AS mh_count
                         from Machine
+                        WHERE is_active = 1
                     `;
     }
     if (emp_count === "true") {
       if (query) query += ` UNION `;
       query += `  SELECT COUNT(DISTINCT Emp_ID) AS emp_count
                         from Emp
+                        WHERE is_active = 1
                     `;
     }
 
@@ -190,7 +199,6 @@ app.get("/api/production/selectData", async (req, res) => {
 // http://localhost:5000/api/production/selectData?emp_count=true  showe จำนวนพนักงานทั้งหมด
 // http://localhost:5000/api/production/selectData?emp_detail=true  showe รายชื่อพนักงานพร้อมชื่อจริง
 
-// ดึงข้อมูลการผลิตของเครื่องจักรตาม Mh_ID
 
 // ดึงข้อมูลการผลิตของเครื่องจักรตาม Mh_ID
 app.get("/api/datalog", async (req, res) => {
@@ -232,7 +240,7 @@ app.get("/api/datalog", async (req, res) => {
                 FROM production_log p 
                 LEFT JOIN Customer c ON p.Cust_ID = c.Cust_ID 
                 LEFT JOIN Terminal_size ts ON p.T_ID = ts.T_ID 
-                LEFT JOIN status s ON p.status = s.status_id 
+                LEFT JOIN status s ON p.status = s.status_id
                 WHERE 1=1`;
 
     let params = [];
@@ -258,10 +266,12 @@ app.get("/api/datalog", async (req, res) => {
         params.push(year);
       }
     }
+    // 🔴 แก้ไขตรงนี้ให้ค้นหา Job ID แบบมีคำบางส่วนก็เจอได้
     if (jobId) {
-      query += ` AND p.job_id = ?`;
-      params.push(jobId);
+      query += ` AND p.job_id LIKE ?`;
+      params.push(`%${jobId}%`);
     }
+    
     query += ` ORDER BY p.Start_Time DESC`;
 
     const [rows] = await pool.query(query, params);
@@ -271,7 +281,6 @@ app.get("/api/datalog", async (req, res) => {
     res.status(500).send("Server Error");
   }
 });
-
 
 // ดึงข้อมูลการผลิตตามเงื่อนไขที่กำหนด (รายชั่วโมง, รายวัน, รายเดือน, รายปี)
 app.get("/api/production/filter", async (req, res) => {
@@ -685,7 +694,6 @@ app.get("/api/production/employee-hourly-report", async (req, res) => {
     res.status(500).send("Server Error");
   }
 });
-
 // ==========================================
 // API: จัดการข้อมูลเครื่องจักร (Machine Master)
 // ==========================================
@@ -719,10 +727,6 @@ app.put("/api/machines/:id", async (req, res) => {
     res.status(500).json({ message: "Server Error" });
   }
 });
-
-
-
-
 
 // ==========================================
 // API: ระบบการซ่อมบำรุง (Maintenance & PM)
@@ -1075,15 +1079,23 @@ app.put("/api/employees/:id", async (req, res) => {
   }
 });
 
-// 4. ลบพนักงาน
+// 4. เปลี่ยนจากการลบจริง เป็นการปิดการใช้งาน (Soft Delete)
 app.delete("/api/employees/:id", async (req, res) => {
   const { id } = req.params;
   try {
-    await pool.query(`DELETE FROM Emp WHERE Emp_ID = ?`, [id]);
-    res.json({ message: "ลบพนักงานสำเร็จ" });
+    // ตรวจสอบก่อนว่ามีพนักงานคนนี้อยู่จริงไหม
+    const [existing] = await pool.query(`SELECT * FROM Emp WHERE Emp_ID = ?`, [id]);
+    if (existing.length === 0) {
+      return res.status(404).json({ message: "ไม่พบข้อมูลพนักงานที่ต้องการลบ" });
+    }
+
+    // อัปเดตสถานะเป็น 0 (Inactive) แทนการลบแถวทิ้ง
+    await pool.query(`UPDATE Emp SET is_active = 0 WHERE Emp_ID = ?`, [id]);
+    res.json({ message: "ปิดการใช้งานพนักงานสำเร็จ" });
+    
   } catch (err) {
-    console.error("Employee Delete Error:", err);
-    res.status(500).json({ message: "Server Error (อาจมีข้อมูลอ้างอิงอยู่)" });
+    console.error("Employee Delete (Deactivate) Error:", err);
+    res.status(500).json({ message: "Server Error เกิดข้อผิดพลาดในการอัปเดตสถานะ" });
   }
 });
 
@@ -1151,6 +1163,7 @@ app.delete("/api/customers/:id", async (req, res) => {
       return res.status(404).json({ message: "ไม่พบข้อมูลลูกค้าที่ต้องการลบ" });
     }
     
+    console.log(`[Delete Customer] ลบข้อมูลลูกค้า ID: ${id} เรียบร้อยแล้ว ${new Date().toLocaleString()}`);
     res.json({ message: "ลบข้อมูลลูกค้าสำเร็จ (ซ่อนข้อมูล)" });
   } catch (err) {
     console.error("Delete Customer Error:", err);
@@ -1214,7 +1227,6 @@ app.put('/api/terminals/:id', async (req, res) => {
   }
 });
 
-
 // ==========================================
 // API: ลบ Terminal (เปลี่ยนเป็น Soft Delete)
 // ==========================================
@@ -1234,7 +1246,6 @@ app.delete("/api/terminals/:id", async (req, res) => {
     res.status(500).json({ message: "Server Error" });
   }
 });
-
 
 // ==========================================
 // 1. API: ดึงรายชื่อลูกค้าทั้งหมด (ให้หน้าเว็บ React แสดงตาราง)
@@ -1275,7 +1286,7 @@ app.get("/api/terminals", async (req, res) => {
 // ==========================================
 app.get("/api/employees_list", async (req, res) => {
   try {
-    const [rows] = await pool.query("SELECT Emp_ID, Emp_Name FROM Emp ORDER BY Emp_ID ASC");
+    const [rows] = await pool.query("SELECT Emp_ID, Emp_Name FROM Emp WHERE is_active = 1 ORDER BY Emp_ID ASC");
     res.json(rows);
   } catch (err) {
     console.error("Get Employees Error:", err);
@@ -1363,8 +1374,6 @@ app.put("/api/system_settings/:id", async (req, res) => {
   }
 });
 
-
-// =================================================================================================================
 
 // ==========================================
 // 1. API: เช็คเวอร์ชันล่าสุด (ให้เครื่องจักรเรียก)
@@ -1605,13 +1614,20 @@ app.get('/delete_file/:filename', (req, res) => {
   }
 });
 
+
+
+app.get('/', (req, res) => {
+    req.socket.destroy();
+});
+
+
 const PORT = process.env.PORT || 5000;
 
 // ฟังก์ชันสำหรับรอให้ Database พร้อมทำงาน
 async function waitForDatabase() {
   let isConnected = false;
 
-  console.log('⏳ Checking database connection...');
+ // console.log('⏳ Checking database connection...');
 
   while (!isConnected) {
     try {
@@ -1627,19 +1643,25 @@ async function waitForDatabase() {
   }
 }
 
-// เริ่มการทำงาน: รอ DB พร้อม -> ค่อยเปิดพอร์ต API -> ค่อยเริ่ม MQTT
-waitForDatabase().then(() => {
-  app.listen(PORT, async () => {
-    console.log(`🚀 Node.js Server running on http://localhost:${PORT}`);
-
-    // เมื่อรัน API ผ่านแล้ว ค่อยให้ MQTT เริ่มทำงาน (เพื่อป้องกัน MQTT เรียกใช้ DB ตอนยังไม่พร้อม)
-
+// เริ่มการทำงาน: รอ DB พร้อม -> โหลด State -> เริ่ม MQTT -> เปิดพอร์ต API
+waitForDatabase().then(async () => {
+    
+    // 1. โหลด State เริ่มต้นให้เรียบร้อยก่อน
     try {
-      await initDailyState();
+        await initDailyState();
+        console.log("✅ Daily state initialized");
     } catch (err) {
-      console.error("Failed to init daily state:", err);
+        console.error("❌ Failed to init daily state:", err);
+        // ถ้าโหลด state ไม่สำเร็จ อาจจะต้องหยุดระบบ หรือจัดการ error ตรงนี้
     }
 
+    // 2. เริ่มเชื่อมต่อ MQTT เพื่อรับข้อมูลจากเครื่องจักร
     setupMQTT();
-  });
+    console.log("✅ MQTT setup completed");
+
+    // 3. เมื่อระบบหลังบ้านพร้อมหมดแล้ว ค่อยเปิด API ให้คนเรียกใช้งาน
+    app.listen(PORT, () => {
+        console.log(`🚀 Node.js Server running on http://localhost:${PORT}`);
+    });
+
 });
